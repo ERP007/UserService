@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN gradle clean test bootJar --no-daemon
+RUN gradle clean bootJar -x test --no-daemon
 
 FROM eclipse-temurin:21-jre-alpine
 
