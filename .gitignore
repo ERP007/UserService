@@ -37,3 +37,8 @@ out/
 .vscode/
 
 /node_modules
+
+AGENTS.md
+CLAUDE.md
+
+.env
