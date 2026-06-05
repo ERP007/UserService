@@ -1,7 +1,5 @@
 package com.fallguys.userservice.domain;
 
-import java.time.LocalDateTime;
-
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -20,8 +18,6 @@ public class User {
     private UserRole role;
     private UserTenancy tenancy;
     private UserStatus status;
-    private final LocalDateTime createdAt;
-    private final LocalDateTime updatedAt;
 
     public static User create(
             String keycloakId,
@@ -43,9 +39,7 @@ public class User {
                 position,
                 role,
                 tenancy,
-                UserStatus.ACTIVE,
-                null,
-                null
+                UserStatus.ACTIVE
         );
     }
 
@@ -59,9 +53,7 @@ public class User {
             String position,
             UserRole role,
             UserTenancy tenancy,
-            UserStatus status,
-            LocalDateTime createdAt,
-            LocalDateTime updatedAt
+            UserStatus status
     ) {
         return new User(
                 id,
@@ -73,9 +65,7 @@ public class User {
                 position,
                 role,
                 tenancy,
-                status == null ? UserStatus.ACTIVE : status,
-                createdAt,
-                updatedAt
+                status == null ? UserStatus.ACTIVE : status
         );
     }
 }

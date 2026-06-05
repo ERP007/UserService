@@ -46,7 +46,6 @@ public class UserEntity {
     @Column(name = "employee_number", nullable = false, length = 100)
     private String employeeNumber;
 
-    @Column(length = 255)
     private String email;
 
     private String name;
@@ -133,9 +132,7 @@ public class UserEntity {
                 position,
                 role,
                 tenancy,
-                status,
-                createdAt,
-                updatedAt
+                status
         );
     }
 
