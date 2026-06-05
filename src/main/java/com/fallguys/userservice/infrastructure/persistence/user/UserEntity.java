@@ -136,6 +136,18 @@ public class UserEntity {
         );
     }
 
+    public UserEntity update(User user) {
+        employeeNumber = user.getEmployeeNumber();
+        email = user.getEmail();
+        name = user.getDisplayName();
+        tenancyCode = user.getTenancyCode();
+        position = user.getPosition();
+        role = user.getRole();
+        tenancy = user.getTenancy();
+        status = user.getStatus();
+        return this;
+    }
+
     @PrePersist
     void prePersist() {
         LocalDateTime now = LocalDateTime.now();

@@ -68,4 +68,23 @@ public class User {
                 status == null ? UserStatus.ACTIVE : status
         );
     }
+
+    public void updateSessionClaims(
+            String employeeNumber,
+            String email,
+            String displayName,
+            String tenancyCode,
+            String position,
+            UserRole role,
+            UserTenancy tenancy
+    ) {
+        this.employeeNumber = employeeNumber;
+        this.email = email;
+        this.displayName = displayName;
+        this.tenancyCode = tenancyCode;
+        this.position = position;
+        this.role = role;
+        this.tenancy = tenancy;
+        this.status = UserStatus.ACTIVE;
+    }
 }
