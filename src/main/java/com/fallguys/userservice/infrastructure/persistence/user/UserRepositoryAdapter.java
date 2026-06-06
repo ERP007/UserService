@@ -23,8 +23,9 @@ public class UserRepositoryAdapter implements UserRepository {
         UserEntity entity = user.getId() == null
                 ? UserEntity.from(user)
                 : userJpaDao.findById(user.getId())
-                        .map(existing -> existing.update(user))
-                        .orElseGet(() -> UserEntity.from(user));
+                  .map(existing -> existing.update(user))
+                  .orElseThrow(() -> new IllegalStateException(
+                          "User entity with id=" + user.getId() + " not found in database"));
 
         return userJpaDao.save(entity).toDomain();
     }
