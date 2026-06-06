@@ -47,7 +47,7 @@ public class TenancySchemaMigrator implements ApplicationRunner {
 
     private void dropPrimaryKeyIfNotTenancyCode() {
         String primaryKey = primaryKeyName();
-        if (primaryKey == null || primaryKeyUsesTenancyCode()) {
+        if (primaryKey == null || primaryKeyIsOnlyTenancyCode()) {
             return;
         }
 
@@ -61,7 +61,7 @@ public class TenancySchemaMigrator implements ApplicationRunner {
     }
 
     private void addTenancyCodePrimaryKeyIfMissing() {
-        if (primaryKeyUsesTenancyCode()) {
+        if (primaryKeyIsOnlyTenancyCode()) {
             return;
         }
 
@@ -95,13 +95,12 @@ public class TenancySchemaMigrator implements ApplicationRunner {
                 """, resultSet -> resultSet.next() ? resultSet.getString("constraint_name") : null);
     }
 
-    private boolean primaryKeyUsesTenancyCode() {
-        Integer count = jdbcTemplate.queryForObject("""
-                select count(*)
+    private boolean primaryKeyIsOnlyTenancyCode() {
+        return jdbcTemplate.query("""
+                select column_name
                 from information_schema.key_column_usage
                 where table_schema = current_schema()
                   and table_name = 'tenancies'
-                  and column_name = 'tenancy_code'
                   and constraint_name = (
                       select constraint_name
                       from information_schema.table_constraints
@@ -109,8 +108,8 @@ public class TenancySchemaMigrator implements ApplicationRunner {
                         and table_name = 'tenancies'
                         and constraint_type = 'PRIMARY KEY'
                   )
-                """, Integer.class);
-
-        return count != null && count > 0;
+                order by ordinal_position
+                """, (resultSet, rowNumber) -> resultSet.getString("column_name"))
+                .equals(java.util.List.of("tenancy_code"));
     }
 }
