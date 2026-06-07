@@ -6,5 +6,7 @@ public interface UserRepository {
 
     Optional<User> findByKeycloakId(String keycloakId);
 
+    UserListPage findUsers(UserSearchQuery query);
+
     User save(User user);
 }

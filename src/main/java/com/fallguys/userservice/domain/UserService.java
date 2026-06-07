@@ -47,6 +47,26 @@ public class UserService {
                 .orElseGet(() -> userRepository.save(createUser(claims)));
     }
 
+    /**
+     * 관리자 전용 사용자 목록을 조회한다.
+     *
+     * 흐름:
+     * 1) JWT Claim의 tenancy_code, tenancy_type, user_role이 모두 ADMIN인지 확인한다.
+     * 2) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
+     * 3) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
+     *
+     * 트랜잭션: 읽기 전용. 사용자 목록과 페이지 메타데이터만 조회하며 상태를 변경하지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 조회 중단.
+     * - 필수 권한 Claim 누락 또는 미지원 값: ResponseStatusException(403), 조회 중단.
+     */
+    @Transactional(readOnly = true)
+    public UserListPage findUsers(Jwt jwt, UserSearchQuery query) {
+        requireAdmin(jwt);
+        return userRepository.findUsers(query);
+    }
+
     private User createUser(SessionClaims claims) {
         return User.create(
                 claims.keycloakId(),
@@ -58,6 +78,16 @@ public class UserService {
                 claims.role(),
                 claims.tenancy()
         );
+    }
+
+    private void requireAdmin(Jwt jwt) {
+        UserRole role = resolveRole(jwt);
+        UserTenancy tenancy = resolveTenancy(jwt);
+        String tenancyCode = jwt.getClaimAsString("tenancy_code");
+
+        if (!"ADMIN".equals(tenancyCode) || role != UserRole.ADMIN || tenancy != UserTenancy.ADMIN) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admin users can access this API");
+        }
     }
 
     private UserRole resolveRole(Jwt jwt) {

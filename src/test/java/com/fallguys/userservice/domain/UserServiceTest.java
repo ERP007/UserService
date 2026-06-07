@@ -3,10 +3,12 @@ package com.fallguys.userservice.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -85,6 +87,68 @@ class UserServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void findsUsersWhenAccessTokenClaimsAreAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserSearchQuery query = userSearchQuery();
+        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
+        when(userRepository.findUsers(query)).thenReturn(expected);
+
+        UserListPage actual = userService.findUsers(jwt, query);
+
+        assertThat(actual).isSameAs(expected);
+        verify(userRepository).findUsers(query);
+    }
+
+    @Test
+    void rejectsUserListAccessWhenUserRoleIsNotAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "HQ_MANAGER", "부장");
+        UserSearchQuery query = userSearchQuery();
+
+        assertThatThrownBy(() -> userService.findUsers(jwt, query))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
+    }
+
+    @Test
+    void rejectsUserListAccessWhenTenancyTypeIsNotAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "HQ", "ADMIN", "관리자");
+        UserSearchQuery query = userSearchQuery();
+
+        assertThatThrownBy(() -> userService.findUsers(jwt, query))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
+    }
+
+    @Test
+    void rejectsUserListAccessWhenTenancyCodeIsNotAdmin() {
+        Jwt jwt = jwt("admin001", "HQ", "ADMIN", "ADMIN", "관리자");
+        UserSearchQuery query = userSearchQuery();
+
+        assertThatThrownBy(() -> userService.findUsers(jwt, query))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
+    }
+
+    private UserSearchQuery userSearchQuery() {
+        return new UserSearchQuery(
+                1,
+                10,
+                null,
+                null,
+                null,
+                null,
+                UserSortBy.EMPLOYEE_NO,
+                UserSortDirection.ASC
+        );
     }
 
     private Jwt jwt(String employeeNo, String tenancyCode, String tenancyType, String userRole, String position) {
