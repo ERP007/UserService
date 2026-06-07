@@ -7,7 +7,6 @@ import com.fallguys.userservice.domain.UserSearchQuery;
 import com.fallguys.userservice.domain.UserSortBy;
 import com.fallguys.userservice.domain.UserSortDirection;
 import com.fallguys.userservice.domain.UserStatus;
-import com.fallguys.userservice.domain.UserTenancy;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
@@ -17,7 +16,7 @@ public record UserSearchRequest(
         int size,
         String keyword,
         String role,
-        String tenancy,
+        String tenancyCode,
         String status,
         String sortBy,
         String sortDirection
@@ -36,7 +35,7 @@ public record UserSearchRequest(
                 normalizedSize,
                 normalizeKeyword(keyword),
                 enumFilter(role, UserRole.class, "role"),
-                enumFilter(tenancy, UserTenancy.class, "tenancy"),
+                codeFilter(tenancyCode),
                 enumFilter(status, UserStatus.class, "status"),
                 enumValue(sortBy, UserSortBy.class, "sortBy"),
                 enumValue(sortDirection, UserSortDirection.class, "sortDirection")
@@ -65,6 +64,14 @@ public record UserSearchRequest(
         }
 
         return keyword.trim();
+    }
+
+    private static String codeFilter(String value) {
+        if (!StringUtils.hasText(value) || "ALL".equalsIgnoreCase(value.trim())) {
+            return null;
+        }
+
+        return value.trim().toUpperCase(Locale.ROOT);
     }
 
     private static <T extends Enum<T>> T enumFilter(String value, Class<T> enumType, String parameterName) {

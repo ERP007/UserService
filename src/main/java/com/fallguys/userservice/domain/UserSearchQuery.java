@@ -5,7 +5,7 @@ public record UserSearchQuery(
         int size,
         String keyword,
         UserRole role,
-        UserTenancy tenancy,
+        String tenancyCode,
         UserStatus status,
         UserSortBy sortBy,
         UserSortDirection sortDirection
