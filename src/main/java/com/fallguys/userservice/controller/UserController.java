@@ -1,6 +1,8 @@
 package com.fallguys.userservice.controller;
 
 import com.fallguys.userservice.controller.dto.SessionResponse;
+import com.fallguys.userservice.controller.dto.UserListResponse;
+import com.fallguys.userservice.controller.dto.UserSearchRequest;
 import com.fallguys.userservice.domain.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -9,6 +11,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -19,13 +22,46 @@ class UserController {
 
     private final UserService userService;
 
+    @GetMapping
+    UserListResponse users(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "ALL") String role,
+            @RequestParam(name = "tenancy_code", defaultValue = "ALL") String tenancyCode,
+            @RequestParam(defaultValue = "ALL") String status,
+            @RequestParam(defaultValue = "employeeNo") String sortBy,
+            @RequestParam(defaultValue = "ASC") String sortDirection
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        UserSearchRequest request = new UserSearchRequest(
+                page,
+                size,
+                keyword,
+                role,
+                tenancyCode,
+                status,
+                sortBy,
+                sortDirection
+        );
+
+        return UserListResponse.from(userService.findUsers(authenticatedJwt, request.toQuery()));
+    }
+
     @GetMapping("/session")
     SessionResponse me(@AuthenticationPrincipal Jwt jwt) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+
+        userService.getOrCreateUser(authenticatedJwt);
+        return SessionResponse.from(authenticatedJwt);
+    }
+
+    private Jwt requireJwt(Jwt jwt) {
         if (jwt == null || !StringUtils.hasText(jwt.getSubject())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "JWT subject is missing");
         }
 
-        userService.getOrCreateUser(jwt);
-        return SessionResponse.from(jwt);
+        return jwt;
     }
 }
