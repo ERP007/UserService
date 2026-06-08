@@ -32,7 +32,7 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testAnnotationProcessor 'org.projectlombok:lombok'
 
-    implementation "org.keycloak:keycloak-admin-client:26.6.2"
+    implementation "org.keycloak:keycloak-admin-client:26.0.9"
 }
 
 tasks.named('test') {
