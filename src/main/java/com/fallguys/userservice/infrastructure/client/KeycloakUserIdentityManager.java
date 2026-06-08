@@ -1,5 +1,6 @@
 package com.fallguys.userservice.infrastructure.client;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.Optional;
 import com.fallguys.userservice.domain.CreateUserCommand;
 import com.fallguys.userservice.domain.UserIdentity;
 import com.fallguys.userservice.domain.UserIdentityManager;
+import com.fallguys.userservice.domain.UserIdentityState;
 import com.fallguys.userservice.domain.UserRole;
 import com.fallguys.userservice.domain.UserTenancy;
 import com.fallguys.userservice.domain.exception.UserAlreadyExistsException;
@@ -94,11 +96,29 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     @Override
     public void resetPassword(String keycloakId, String temporaryPassword) {
         try {
-            user(keycloakId).resetPassword(passwordCredential(temporaryPassword));
+            UserResource userResource = user(keycloakId);
+            userResource.resetPassword(passwordCredential(temporaryPassword));
+            requirePasswordUpdate(userResource);
         } catch (NotFoundException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
         } catch (ProcessingException | WebApplicationException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_PASSWORD_RESET_FAILED, ex);
+        }
+    }
+
+    @Override
+    public UserIdentityState toggleEnabled(String keycloakId) {
+        try {
+            UserResource userResource = user(keycloakId);
+            UserRepresentation representation = userResource.toRepresentation();
+            boolean enabled = !Boolean.TRUE.equals(representation.isEnabled()); // 현재 활성상태
+            representation.setEnabled(enabled);
+            userResource.update(representation);
+            return new UserIdentityState(enabled, passwordUpdateRequired(representation));
+        } catch (NotFoundException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_ENABLED_UPDATE_FAILED, ex);
         }
     }
 
@@ -155,6 +175,20 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         credential.setValue(temporaryPassword);
         credential.setTemporary(true);
         return credential;
+    }
+
+    private void requirePasswordUpdate(UserResource userResource) {
+        UserRepresentation representation = userResource.toRepresentation();
+        List<String> requiredActions = representation.getRequiredActions();
+        List<String> updatedRequiredActions = requiredActions == null
+                ? new ArrayList<>()
+                : new ArrayList<>(requiredActions);
+
+        if (!updatedRequiredActions.contains(UPDATE_PASSWORD)) {
+            updatedRequiredActions.add(UPDATE_PASSWORD);
+            representation.setRequiredActions(updatedRequiredActions);
+            userResource.update(representation);
+        }
     }
 
     private Map<String, List<String>> attributes(CreateUserCommand command) {
@@ -233,6 +267,11 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         }
 
         return values.get(0);
+    }
+
+    private boolean passwordUpdateRequired(UserRepresentation representation) {
+        List<String> requiredActions = representation.getRequiredActions();
+        return requiredActions != null && requiredActions.contains(UPDATE_PASSWORD);
     }
 
     private Map<String, List<String>> maskedAttributes(Map<String, List<String>> attributes) {

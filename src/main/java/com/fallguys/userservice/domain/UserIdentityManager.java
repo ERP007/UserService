@@ -10,5 +10,7 @@ public interface UserIdentityManager {
 
     void resetPassword(String keycloakId, String temporaryPassword);
 
+    UserIdentityState toggleEnabled(String keycloakId);
+
     void delete(String keycloakId);
 }
