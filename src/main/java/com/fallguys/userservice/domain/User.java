@@ -43,6 +43,30 @@ public class User {
         );
     }
 
+    public static User createPending(
+            String keycloakId,
+            String employeeNumber,
+            String email,
+            String displayName,
+            String tenancyCode,
+            String position,
+            UserRole role,
+            UserTenancy tenancy
+    ) {
+        return new User(
+                null,
+                keycloakId,
+                employeeNumber,
+                email,
+                displayName,
+                tenancyCode,
+                position,
+                role,
+                tenancy,
+                UserStatus.PENDING
+        );
+    }
+
     public static User restore(
             Long id,
             String keycloakId,

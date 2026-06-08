@@ -91,7 +91,7 @@ public class UserService {
         CreateUserCommand commandWithPassword = command.withInitialPassword(initialPassword);
 
         UserIdentity identity = userIdentityManager.create(commandWithPassword);
-        User user = User.create(
+        User user = User.createPending(
                 identity.keycloakId(),
                 identity.employeeNumber(),
                 identity.email(),

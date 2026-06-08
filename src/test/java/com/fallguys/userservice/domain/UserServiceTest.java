@@ -171,7 +171,7 @@ class UserServiceTest {
         assertThat(result.user().getTenancyCode()).isEqualTo("BR-001");
         assertThat(result.user().getRole()).isEqualTo(UserRole.BRANCH_STAFF);
         assertThat(result.user().getTenancy()).isEqualTo(UserTenancy.BRANCH);
-        assertThat(result.user().getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
         verify(userIdentityManager).create(command);
         verify(userRepository).save(any(User.class));
     }
@@ -208,6 +208,7 @@ class UserServiceTest {
                 .matches(".*[A-Za-z].*")
                 .matches(".*\\d.*");
         assertThat(result.temporaryPassword()).isEqualTo(generatedPassword);
+        assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
         verify(userRepository).save(any(User.class));
     }
 
