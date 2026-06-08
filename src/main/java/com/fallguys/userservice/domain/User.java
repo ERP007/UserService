@@ -111,4 +111,8 @@ public class User {
         this.tenancy = tenancy;
         this.status = UserStatus.ACTIVE;
     }
+
+    public void markPasswordResetRequired() {
+        this.status = UserStatus.PENDING;
+    }
 }

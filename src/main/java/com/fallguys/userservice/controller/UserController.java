@@ -2,6 +2,7 @@ package com.fallguys.userservice.controller;
 
 import com.fallguys.userservice.controller.dto.CreateUserRequest;
 import com.fallguys.userservice.controller.dto.CreateUserResponse;
+import com.fallguys.userservice.controller.dto.ResetPasswordResponse;
 import com.fallguys.userservice.controller.dto.SessionResponse;
 import com.fallguys.userservice.controller.dto.UserListResponse;
 import com.fallguys.userservice.controller.dto.UserSearchRequest;
@@ -12,6 +13,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -70,6 +73,15 @@ class UserController {
     ) {
         Jwt authenticatedJwt = requireJwt(jwt);
         return CreateUserResponse.from(userService.createUser(authenticatedJwt, request.toCommand()));
+    }
+
+    @PatchMapping("/{keycloakId}/reset-password")
+    ResetPasswordResponse resetPassword(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String keycloakId
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return ResetPasswordResponse.from(userService.resetPassword(authenticatedJwt, keycloakId));
     }
 
     private Jwt requireJwt(Jwt jwt) {

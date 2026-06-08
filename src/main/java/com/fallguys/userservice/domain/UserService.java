@@ -116,14 +116,48 @@ public class UserService {
         }
     }
 
+    /**
+     * 관리자 요청으로 사용자의 Keycloak 비밀번호를 임시 비밀번호로 초기화한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자 존재 여부를 keycloakId로 확인한다.
+     * 3) 서버에서 임시 비밀번호를 생성하고 Keycloak에 temporary credential로 설정한다(외부 호출).
+     * 4) 로컬 사용자 상태를 PENDING으로 변경해 다음 로그인 시 비밀번호 변경이 필요함을 반영한다.
+     *
+     * 트랜잭션: 쓰기. Keycloak 초기화 실패 시 로컬 상태는 변경하지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 초기화 중단.
+     * - 로컬 사용자 없음: ResponseStatusException(404), 초기화 중단.
+     * - Keycloak 초기화 실패: BusinessException 계열, 로컬 저장 전 중단.
+     */
+    @Transactional
+    public ResetPasswordResult resetPassword(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        String temporaryPassword = issueTemporaryPassword();
+
+        userIdentityManager.resetPassword(keycloakId, temporaryPassword);
+        user.markPasswordResetRequired();
+
+        return new ResetPasswordResult(userRepository.save(user), temporaryPassword);
+    }
+
     private String issueInitialPassword(CreateUserCommand command) {
         if (command.passwordIssueMode() == PasswordIssueMode.AUTO) {
-            String generatedPassword = TemporaryPasswordGenerator.generate();
-            TemporaryPasswordPolicy.validate(generatedPassword);
-            return generatedPassword;
+            return issueTemporaryPassword();
         }
 
         return command.initialPassword();
+    }
+
+    private String issueTemporaryPassword() {
+        String generatedPassword = TemporaryPasswordGenerator.generate();
+        TemporaryPasswordPolicy.validate(generatedPassword);
+        return generatedPassword;
     }
 
     private User createUserFromClaims(SessionClaims claims) {

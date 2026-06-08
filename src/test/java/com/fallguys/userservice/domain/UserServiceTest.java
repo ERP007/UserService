@@ -3,6 +3,7 @@ package com.fallguys.userservice.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -220,6 +221,63 @@ class UserServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(userIdentityManager);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void resetsPasswordWithGeneratedTemporaryPasswordAndMarksUserPending() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ResetPasswordResult result = userService.resetPassword(jwt, targetKeycloakId);
+
+        ArgumentCaptor<String> passwordCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userIdentityManager).resetPassword(eq(targetKeycloakId), passwordCaptor.capture());
+        String temporaryPassword = passwordCaptor.getValue();
+        assertThat(temporaryPassword)
+                .isNotBlank()
+                .hasSizeGreaterThanOrEqualTo(TemporaryPasswordPolicy.MIN_LENGTH)
+                .matches(".*[A-Za-z].*")
+                .matches(".*\\d.*");
+        assertThat(result.temporaryPassword()).isEqualTo(temporaryPassword);
+        assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void rejectsResetPasswordWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+
+        assertThatThrownBy(() -> userService.resetPassword(jwt, "target-keycloak-id"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(userIdentityManager);
+        verify(userRepository, never()).findByKeycloakId(any(String.class));
+    }
+
+    @Test
+    void rejectsResetPasswordWhenUserDoesNotExist() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        when(userRepository.findByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.resetPassword(jwt, "missing-keycloak-id"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).save(any(User.class));
     }
