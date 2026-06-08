@@ -30,7 +30,10 @@ import lombok.NoArgsConstructor;
 @Getter
 @Entity
 @Table(name = "users",
-        uniqueConstraints = @UniqueConstraint(name = "uk_users_keycloak_id", columnNames = "keycloak_id"),
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_users_keycloak_id", columnNames = "keycloak_id"),
+                @UniqueConstraint(name = "uk_users_employee_number", columnNames = "employee_number")
+        },
         indexes = @Index(name = "idx_users_keycloak_id", columnList = "keycloak_id")
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final UserIdentityManager userIdentityManager;
 
     /**
      * Gateway가 Relay한 Keycloak Access Token과 매핑되는 로컬 사용자를 조회하거나 생성한다.
@@ -44,7 +45,7 @@ public class UserService {
                     );
                     return userRepository.save(user);
                 })
-                .orElseGet(() -> userRepository.save(createUser(claims)));
+                .orElseGet(() -> userRepository.save(createUserFromClaims(claims)));
     }
 
     /**
@@ -67,7 +68,65 @@ public class UserService {
         return userRepository.findUsers(query);
     }
 
-    private User createUser(SessionClaims claims) {
+    /**
+     * 관리자 요청으로 Keycloak 사용자와 로컬 사용자를 함께 생성한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
+     * 3) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     *
+     * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다. 로컬 저장 실패 시 생성된 Keycloak 사용자는 삭제를 시도한다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 생성 중단.
+     * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
+     * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도.
+     */
+    @Transactional
+    public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
+        requireAdmin(jwt);
+
+        String initialPassword = issueInitialPassword(command);
+        CreateUserCommand commandWithPassword = command.withInitialPassword(initialPassword);
+
+        UserIdentity identity = userIdentityManager.create(commandWithPassword);
+        User user = User.create(
+                identity.keycloakId(),
+                identity.employeeNumber(),
+                identity.email(),
+                identity.displayName(),
+                identity.tenancyCode(),
+                identity.position(),
+                identity.role(),
+                identity.tenancy()
+        );
+
+        try {
+            User savedUser = userRepository.save(user);
+            String responsePassword = command.passwordIssueMode() == PasswordIssueMode.AUTO ? initialPassword : null;
+            return new CreateUserResult(savedUser, responsePassword);
+        } catch (RuntimeException ex) {
+            try {
+                userIdentityManager.delete(identity.keycloakId());
+            } catch (RuntimeException deleteEx) {
+                ex.addSuppressed(deleteEx);
+            }
+            throw ex;
+        }
+    }
+
+    private String issueInitialPassword(CreateUserCommand command) {
+        if (command.passwordIssueMode() == PasswordIssueMode.AUTO) {
+            String generatedPassword = TemporaryPasswordGenerator.generate();
+            TemporaryPasswordPolicy.validate(generatedPassword);
+            return generatedPassword;
+        }
+
+        return command.initialPassword();
+    }
+
+    private User createUserFromClaims(SessionClaims claims) {
         return User.create(
                 claims.keycloakId(),
                 claims.employeeNumber(),

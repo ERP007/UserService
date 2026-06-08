@@ -1,5 +1,7 @@
 package com.fallguys.userservice.controller;
 
+import com.fallguys.userservice.controller.dto.CreateUserRequest;
+import com.fallguys.userservice.controller.dto.CreateUserResponse;
 import com.fallguys.userservice.controller.dto.SessionResponse;
 import com.fallguys.userservice.controller.dto.UserListResponse;
 import com.fallguys.userservice.controller.dto.UserSearchRequest;
@@ -10,8 +12,11 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -55,6 +60,16 @@ class UserController {
 
         userService.getOrCreateUser(authenticatedJwt);
         return SessionResponse.from(authenticatedJwt);
+    }
+
+    @PostMapping("/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    CreateUserResponse createUser(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestBody CreateUserRequest request
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return CreateUserResponse.from(userService.createUser(authenticatedJwt, request.toCommand()));
     }
 
     private Jwt requireJwt(Jwt jwt) {
