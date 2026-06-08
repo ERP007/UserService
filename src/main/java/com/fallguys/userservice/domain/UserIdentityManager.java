@@ -8,5 +8,7 @@ public interface UserIdentityManager {
 
     UserIdentity create(CreateUserCommand command);
 
+    void resetPassword(String keycloakId, String temporaryPassword);
+
     void delete(String keycloakId);
 }

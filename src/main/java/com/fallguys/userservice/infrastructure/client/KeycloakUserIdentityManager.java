@@ -91,6 +91,17 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         }
     }
 
+    @Override
+    public void resetPassword(String keycloakId, String temporaryPassword) {
+        try {
+            user(keycloakId).resetPassword(passwordCredential(temporaryPassword));
+        } catch (NotFoundException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_PASSWORD_RESET_FAILED, ex);
+        }
+    }
+
     private UsersResource users() {
         return keycloak.realm(properties.realm()).users();
     }
@@ -135,9 +146,13 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     }
 
     private CredentialRepresentation passwordCredential(CreateUserCommand command) {
+        return passwordCredential(command.initialPassword());
+    }
+
+    private CredentialRepresentation passwordCredential(String temporaryPassword) {
         CredentialRepresentation credential = new CredentialRepresentation();
         credential.setType(CredentialRepresentation.PASSWORD);
-        credential.setValue(command.initialPassword());
+        credential.setValue(temporaryPassword);
         credential.setTemporary(true);
         return credential;
     }
