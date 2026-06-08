@@ -1,9 +1,11 @@
 package com.fallguys.userservice.infrastructure.client;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import com.fallguys.userservice.domain.CreateUserCommand;
@@ -52,6 +54,22 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         try {
             UserRepresentation representation = user(keycloakId).toRepresentation();
             return Optional.of(toIdentity(representation));
+        } catch (NotFoundException ex) {
+            return Optional.empty();
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        }
+    }
+
+    @Override
+    public Optional<Instant> findPasswordChangedAt(String keycloakId) {
+        try {
+            return user(keycloakId).credentials().stream()
+                    .filter(this::isPasswordCredential)
+                    .map(CredentialRepresentation::getCreatedDate)
+                    .filter(Objects::nonNull)
+                    .max(Long::compareTo)
+                    .map(Instant::ofEpochMilli);
         } catch (NotFoundException ex) {
             return Optional.empty();
         } catch (ProcessingException | WebApplicationException ex) {
@@ -272,6 +290,10 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     private boolean passwordUpdateRequired(UserRepresentation representation) {
         List<String> requiredActions = representation.getRequiredActions();
         return requiredActions != null && requiredActions.contains(UPDATE_PASSWORD);
+    }
+
+    private boolean isPasswordCredential(CredentialRepresentation credential) {
+        return credential != null && CredentialRepresentation.PASSWORD.equals(credential.getType());
     }
 
     private Map<String, List<String>> maskedAttributes(Map<String, List<String>> attributes) {

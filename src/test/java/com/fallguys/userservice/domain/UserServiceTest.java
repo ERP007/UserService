@@ -27,6 +27,9 @@ import org.springframework.web.server.ResponseStatusException;
 class UserServiceTest {
 
     private static final String KEYCLOAK_ID = "7ded38db-833c-47fd-862d-76e32d3a4935";
+    private static final Instant LOGIN_AT = Instant.parse("2026-06-03T00:00:00Z");
+    private static final String LOGIN_SESSION_ID = "session-001";
+    private static final Instant PASSWORD_CHANGED_AT = Instant.parse("2026-06-03T00:10:00Z");
 
     @Mock
     private UserRepository userRepository;
@@ -41,6 +44,7 @@ class UserServiceTest {
     void createsActiveUserFromRelayedKeycloakAccessToken() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User user = userService.getOrCreateUser(jwt);
@@ -54,6 +58,9 @@ class UserServiceTest {
         assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
         assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
+        assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
+        assertThat(user.getPasswordChangedAt()).isEqualTo(PASSWORD_CHANGED_AT);
         verify(userRepository).save(any(User.class));
     }
 
@@ -71,6 +78,7 @@ class UserServiceTest {
         );
         Jwt jwt = jwt("admin001", "WH-HQ-001", "HQ", "HQ_MANAGER", "부장");
         when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(existing));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User user = userService.getOrCreateUser(jwt);
@@ -82,7 +90,34 @@ class UserServiceTest {
         assertThat(user.getRole()).isEqualTo(UserRole.HQ_MANAGER);
         assertThat(user.getTenancy()).isEqualTo(UserTenancy.HQ);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
+        assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
+        assertThat(user.getPasswordChangedAt()).isEqualTo(PASSWORD_CHANGED_AT);
         verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void skipsSaveWhenSessionClaimsAndLoginMetadataAreUnchanged() {
+        User existing = User.create(
+                KEYCLOAK_ID,
+                "admin001",
+                "admin001@erp.com",
+                "윤 영선",
+                "ADMIN",
+                "관리자",
+                UserRole.ADMIN,
+                UserTenancy.ADMIN
+        );
+        existing.updateLastLogin(LOGIN_AT, LOGIN_SESSION_ID);
+        existing.updatePasswordChangedAt(PASSWORD_CHANGED_AT);
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(existing));
+
+        User user = userService.getOrCreateUser(jwt);
+
+        assertThat(user).isSameAs(existing);
+        verify(userIdentityManager, never()).findPasswordChangedAt(any(String.class));
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -416,10 +451,12 @@ class UserServiceTest {
         return Jwt.withTokenValue("token")
                 .header("alg", "none")
                 .subject(KEYCLOAK_ID)
-                .issuedAt(Instant.parse("2026-06-03T00:00:00Z"))
+                .issuedAt(Instant.parse("2026-06-03T00:05:00Z"))
                 .expiresAt(Instant.parse("2026-06-03T01:00:00Z"))
                 .claim("typ", "Bearer")
                 .claim("azp", "erp-client")
+                .claim("auth_time", LOGIN_AT.getEpochSecond())
+                .claim("sid", LOGIN_SESSION_ID)
                 .claim("preferred_username", "admin001")
                 .claim("employee_no", employeeNo)
                 .claim("tenancy_code", tenancyCode)
