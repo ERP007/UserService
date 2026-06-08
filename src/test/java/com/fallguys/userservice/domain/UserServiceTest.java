@@ -282,6 +282,95 @@ class UserServiceTest {
         verify(userRepository, never()).save(any(User.class));
     }
 
+    @Test
+    void togglesEnabledUserToSuspended() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(false, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.toggleSuspension(jwt, targetKeycloakId);
+
+        assertThat(result.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void togglesSuspendedUserToActiveWhenPasswordUpdateIsNotRequired() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        user.applyIdentityState(new UserIdentityState(false, false));
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.toggleSuspension(jwt, targetKeycloakId);
+
+        assertThat(result.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void togglesSuspendedUserToPendingWhenPasswordUpdateIsRequired() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.createPending(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        user.applyIdentityState(new UserIdentityState(false, true));
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(true, true));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userService.toggleSuspension(jwt, targetKeycloakId);
+
+        assertThat(result.getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void rejectsToggleSuspensionWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+
+        assertThatThrownBy(() -> userService.toggleSuspension(jwt, "target-keycloak-id"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verifyNoInteractions(userIdentityManager);
+        verify(userRepository, never()).findByKeycloakId(any(String.class));
+    }
+
     private UserSearchQuery userSearchQuery() {
         return new UserSearchQuery(
                 1,

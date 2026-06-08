@@ -115,4 +115,15 @@ public class User {
     public void markPasswordResetRequired() {
         this.status = UserStatus.PENDING;
     }
+
+    public void applyIdentityState(UserIdentityState identityState) {
+        if (!identityState.enabled()) {
+            this.status = UserStatus.SUSPENDED;
+            return;
+        }
+
+        this.status = identityState.passwordUpdateRequired()
+                ? UserStatus.PENDING
+                : UserStatus.ACTIVE;
+    }
 }

@@ -4,6 +4,7 @@ import com.fallguys.userservice.controller.dto.CreateUserRequest;
 import com.fallguys.userservice.controller.dto.CreateUserResponse;
 import com.fallguys.userservice.controller.dto.ResetPasswordResponse;
 import com.fallguys.userservice.controller.dto.SessionResponse;
+import com.fallguys.userservice.controller.dto.SuspendToggleResponse;
 import com.fallguys.userservice.controller.dto.UserListResponse;
 import com.fallguys.userservice.controller.dto.UserSearchRequest;
 import com.fallguys.userservice.domain.UserService;
@@ -82,6 +83,15 @@ class UserController {
     ) {
         Jwt authenticatedJwt = requireJwt(jwt);
         return ResetPasswordResponse.from(userService.resetPassword(authenticatedJwt, keycloakId));
+    }
+
+    @PatchMapping("/{keycloakId}/suspendToggle")
+    SuspendToggleResponse suspendToggle(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String keycloakId
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return SuspendToggleResponse.from(userService.toggleSuspension(authenticatedJwt, keycloakId));
     }
 
     private Jwt requireJwt(Jwt jwt) {

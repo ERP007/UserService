@@ -146,6 +146,34 @@ public class UserService {
         return new ResetPasswordResult(userRepository.save(user), temporaryPassword);
     }
 
+    /**
+     * 관리자 요청으로 Keycloak 사용자의 enabled 값을 토글하고 로컬 정지 상태를 동기화한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자를 keycloakId로 조회한다.
+     * 3) UserIdentityManager로 Keycloak enabled 값을 반전한다(외부 호출).
+     * 4) 반전 결과를 로컬 사용자 상태에 반영해 저장한다.
+     *
+     * 트랜잭션: 쓰기. Keycloak 상태 변경 실패 시 로컬 상태는 변경하지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 토글 중단.
+     * - 로컬 사용자 없음: ResponseStatusException(404), 토글 중단.
+     * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 전 중단.
+     */
+    @Transactional
+    public User toggleSuspension(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        UserIdentityState identityState = userIdentityManager.toggleEnabled(keycloakId);
+
+        user.applyIdentityState(identityState);
+        return userRepository.save(user);
+    }
+
     private String issueInitialPassword(CreateUserCommand command) {
         if (command.passwordIssueMode() == PasswordIssueMode.AUTO) {
             return issueTemporaryPassword();
