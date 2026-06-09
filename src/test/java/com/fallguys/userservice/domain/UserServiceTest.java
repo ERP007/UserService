@@ -216,6 +216,19 @@ class UserServiceTest {
     }
 
     @Test
+    void rejectsBatchUserListWhenEmployeeNumbersExceedMaxSize() {
+        List<String> employeeNumbers = java.util.stream.IntStream.rangeClosed(1, 101)
+                .mapToObj(number -> "EMP%03d".formatted(number))
+                .toList();
+
+        assertThatThrownBy(() -> userService.findBatchUsers(employeeNumbers))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
+    }
+
+    @Test
     void findsUserDetailWhenAccessTokenClaimsAreAdmin() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
