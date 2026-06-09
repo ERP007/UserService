@@ -278,6 +278,42 @@ class UserServiceTest {
     }
 
     @Test
+    void findsMyPageByAuthenticatedUserSubject() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        UserDetail expected = userDetail(KEYCLOAK_ID, UserStatus.ACTIVE);
+        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(expected));
+
+        UserDetail actual = userService.findMyPage(jwt);
+
+        assertThat(actual).isSameAs(expected);
+        verify(userRepository).findDetailByKeycloakId(KEYCLOAK_ID);
+    }
+
+    @Test
+    void rejectsMyPageWhenUserIsPending() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID))
+                .thenReturn(Optional.of(userDetail(KEYCLOAK_ID, UserStatus.PENDING)));
+
+        assertThatThrownBy(() -> userService.findMyPage(jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void rejectsMyPageWhenUserIsSuspended() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID))
+                .thenReturn(Optional.of(userDetail(KEYCLOAK_ID, UserStatus.SUSPENDED)));
+
+        assertThatThrownBy(() -> userService.findMyPage(jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
     void updatesUserProfileInKeycloakAndLocalDatabaseWhenAdminRequests() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
@@ -757,6 +793,24 @@ class UserServiceTest {
                 "WH-BR-001",
                 "MANAGER",
                 UserRole.BRANCH_MANAGER
+        );
+    }
+
+    private UserDetail userDetail(String keycloakId, UserStatus status) {
+        return new UserDetail(
+                keycloakId,
+                "HMC0001",
+                "김정수",
+                "jskim@hyundaiparts.com",
+                "WH-BR-001",
+                "강남 1지점",
+                UserRole.BRANCH_MANAGER,
+                "MANAGER",
+                status,
+                LocalDate.parse("2023-04-12"),
+                LOGIN_AT,
+                PASSWORD_CHANGED_AT,
+                LocalDateTime.parse("2023-04-12T10:30:00")
         );
     }
 

@@ -2,6 +2,7 @@ package com.fallguys.userservice.controller;
 
 import com.fallguys.userservice.controller.dto.CreateUserRequest;
 import com.fallguys.userservice.controller.dto.CreateUserResponse;
+import com.fallguys.userservice.controller.dto.MyPageResponse;
 import com.fallguys.userservice.controller.dto.ResetPasswordResponse;
 import com.fallguys.userservice.controller.dto.SessionResponse;
 import com.fallguys.userservice.controller.dto.SuspendToggleResponse;
@@ -66,6 +67,12 @@ class UserController {
 
         userService.getOrCreateUser(authenticatedJwt);
         return SessionResponse.from(authenticatedJwt);
+    }
+
+    @GetMapping("/me")
+    MyPageResponse myPage(@AuthenticationPrincipal Jwt jwt) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return MyPageResponse.from(userService.findMyPage(authenticatedJwt));
     }
 
     @GetMapping("/{keycloakId}")
