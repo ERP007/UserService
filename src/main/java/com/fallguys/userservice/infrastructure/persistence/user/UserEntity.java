@@ -1,5 +1,6 @@
 package com.fallguys.userservice.infrastructure.persistence.user;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 import com.fallguys.userservice.domain.User;
@@ -30,7 +31,10 @@ import lombok.NoArgsConstructor;
 @Getter
 @Entity
 @Table(name = "users",
-        uniqueConstraints = @UniqueConstraint(name = "uk_users_keycloak_id", columnNames = "keycloak_id"),
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_users_keycloak_id", columnNames = "keycloak_id"),
+                @UniqueConstraint(name = "uk_users_employee_number", columnNames = "employee_number")
+        },
         indexes = @Index(name = "idx_users_keycloak_id", columnList = "keycloak_id")
 )
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -85,6 +89,15 @@ public class UserEntity {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
+
+    @Column(name = "last_login_session_id", length = 100)
+    private String lastLoginSessionId;
+
+    @Column(name = "password_changed_at")
+    private Instant passwordChangedAt;
+
     private UserEntity(
             String keycloakId,
             String employeeNumber,
@@ -118,6 +131,9 @@ public class UserEntity {
                 user.getTenancy()
         );
         entity.status = user.getStatus();
+        entity.lastLoginAt = user.getLastLoginAt();
+        entity.lastLoginSessionId = user.getLastLoginSessionId();
+        entity.passwordChangedAt = user.getPasswordChangedAt();
         return entity;
     }
 
@@ -132,7 +148,10 @@ public class UserEntity {
                 position,
                 role,
                 tenancy,
-                status
+                status,
+                lastLoginAt,
+                lastLoginSessionId,
+                passwordChangedAt
         );
     }
 
@@ -145,6 +164,9 @@ public class UserEntity {
         role = user.getRole();
         tenancy = user.getTenancy();
         status = user.getStatus();
+        lastLoginAt = user.getLastLoginAt();
+        lastLoginSessionId = user.getLastLoginSessionId();
+        passwordChangedAt = user.getPasswordChangedAt();
         return this;
     }
 

@@ -1,5 +1,6 @@
 package com.fallguys.userservice.infrastructure.persistence.tenancy;
 
+import com.fallguys.userservice.domain.Tenancy;
 import com.fallguys.userservice.domain.TenancyType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -36,6 +37,10 @@ public class TenancyEntity {
 
     public static TenancyEntity create(String tenancyCode, String name, TenancyType type) {
         return new TenancyEntity(tenancyCode, name, type);
+    }
+
+    public Tenancy toDomain() {
+        return new Tenancy(tenancyCode, name, type);
     }
 
     public void updateSeedData(String name, TenancyType type) {

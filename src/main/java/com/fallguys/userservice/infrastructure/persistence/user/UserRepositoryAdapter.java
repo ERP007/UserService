@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fallguys.userservice.domain.User;
+import com.fallguys.userservice.domain.UserDetail;
 import com.fallguys.userservice.domain.UserListItem;
 import com.fallguys.userservice.domain.UserListPage;
 import com.fallguys.userservice.domain.UserRepository;
@@ -30,6 +31,12 @@ public class UserRepositoryAdapter implements UserRepository {
     @Override
     public Optional<User> findByKeycloakId(String keycloakId) {
         return userJpaDao.findByKeycloakId(keycloakId).map(UserEntity::toDomain);
+    }
+
+    @Override
+    public Optional<UserDetail> findDetailByKeycloakId(String keycloakId) {
+        return userJpaDao.findDetailByKeycloakId(keycloakId)
+                .map(this::toDetail);
     }
 
     @Override
@@ -112,14 +119,32 @@ public class UserRepositoryAdapter implements UserRepository {
                 entity.getEmployeeNumber(),
                 entity.getName(),
                 entity.getEmail(),
-                department(entity),
+                tenancyName(entity),
                 entity.getRole(),
                 entity.getStatus(),
                 joinedAt(entity)
         );
     }
 
-    private String department(UserEntity entity) {
+    private UserDetail toDetail(UserEntity entity) {
+        return new UserDetail(
+                entity.getKeycloakId(),
+                entity.getEmployeeNumber(),
+                entity.getName(),
+                entity.getEmail(),
+                entity.getTenancyCode(),
+                tenancyName(entity),
+                entity.getRole(),
+                entity.getPosition(),
+                entity.getStatus(),
+                joinedAt(entity),
+                entity.getLastLoginAt(),
+                entity.getPasswordChangedAt(),
+                entity.getCreatedAt()
+        );
+    }
+
+    private String tenancyName(UserEntity entity) {
         if (entity.getTenancyEntity() == null) {
             return entity.getTenancyCode();
         }

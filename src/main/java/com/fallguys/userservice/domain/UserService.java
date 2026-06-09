@@ -1,39 +1,76 @@
 package com.fallguys.userservice.domain;
 
+import java.time.Instant;
+import java.util.Date;
+import java.util.Optional;
+
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class UserService {
 
+    private static final int KEYCLOAK_SYNC_MAX_ATTEMPTS = 3;
+
     private final UserRepository userRepository;
+    private final TenancyRepository tenancyRepository;
+    private final UserIdentityManager userIdentityManager;
 
     /**
      * Gateway가 Relay한 Keycloak Access Token과 매핑되는 로컬 사용자를 조회하거나 생성한다.
      *
      * 흐름:
      * 1) JWT에서 사용자 ID, 소속, 권한 Claim을 추출한다.
-     * 2) Keycloak sub와 매핑되는 로컬 사용자가 없으면 ACTIVE 상태로 생성한다.
-     * 3) 기존 사용자는 토큰 기반 프로필과 권한 필드를 최신 값으로 갱신한다.
+     * 2) JWT의 auth_time/iat와 sid로 마지막 로그인 시각과 로그인 세션 ID를 계산한다.
+     * 3) Keycloak password credential의 createdDate를 조회해 비밀번호 마지막 변경 시각을 계산한다(외부 호출).
+     * 4) Keycloak sub와 매핑되는 로컬 사용자가 없으면 ACTIVE 상태로 생성한다.
+     * 5) 기존 사용자는 토큰 기반 프로필·권한·로그인 메타데이터를 최신 값으로 갱신한다.
      *
-     * 트랜잭션: 쓰기. 신규 사용자는 저장하고 기존 사용자는 JPA 변경 감지로 갱신한다.
+     * 트랜잭션: 쓰기. 외부 credential 조회 실패 시 저장 전 중단되어 로컬 값은 변경되지 않는다.
      *
      * 예외:
      * - subject 누락: 컨트롤러에서 이 메서드 호출 전에 차단한다.
      * - 필수 Claim 누락 또는 미지원 값: ResponseStatusException(403), 트랜잭션 롤백.
+     * - Keycloak credential 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      */
     @Transactional
     public User getOrCreateUser(Jwt jwt) {
         SessionClaims claims = SessionClaims.from(jwt, resolveRole(jwt), resolveTenancy(jwt));
+        Instant loginAt = resolveLoginAt(jwt);
+        String loginSessionId = jwt.getClaimAsString("sid");
 
         return userRepository.findByKeycloakId(claims.keycloakId())
                 .map(user -> {
-                    user.updateSessionClaims(
+                    Instant passwordChangedAt = shouldSyncPasswordChangedAt(user, loginSessionId)
+                            ? findPasswordChangedAt(claims.keycloakId()).orElse(null)
+                            : user.getPasswordChangedAt();
+                    return syncExistingSessionUser(user, claims, loginAt, loginSessionId, passwordChangedAt);
+                })
+                .orElseGet(() -> userRepository.save(createUserFromClaims(
+                        claims,
+                        loginAt,
+                        loginSessionId,
+                        findPasswordChangedAt(claims.keycloakId()).orElse(null)
+                )));
+    }
+
+    private User syncExistingSessionUser(
+            User user,
+            SessionClaims claims,
+            Instant loginAt,
+            String loginSessionId,
+            Instant passwordChangedAt
+    ) {
+        boolean changed = user.updateSessionClaims(
                             claims.employeeNumber(),
                             claims.email(),
                             claims.displayName(),
@@ -41,10 +78,26 @@ public class UserService {
                             claims.position(),
                             claims.role(),
                             claims.tenancy()
-                    );
-                    return userRepository.save(user);
-                })
-                .orElseGet(() -> userRepository.save(createUser(claims)));
+        );
+        changed |= user.updateLastLogin(loginAt, loginSessionId);
+        changed |= user.updatePasswordChangedAt(passwordChangedAt);
+
+        if (!changed) {
+            return user;
+        }
+
+        return userRepository.save(user);
+    }
+
+    private boolean shouldSyncPasswordChangedAt(User user, String loginSessionId) {
+        return user.getPasswordChangedAt() == null
+                || user.getStatus() == UserStatus.PENDING
+                || !hasText(loginSessionId)
+                || !loginSessionId.equals(user.getLastLoginSessionId());
+    }
+
+    private Optional<Instant> findPasswordChangedAt(String keycloakId) {
+        return userIdentityManager.findPasswordChangedAt(keycloakId);
     }
 
     /**
@@ -67,8 +120,214 @@ public class UserService {
         return userRepository.findUsers(query);
     }
 
-    private User createUser(SessionClaims claims) {
-        return User.create(
+    /**
+     * 관리자 전용 사용자 상세 정보를 조회한다.
+     *
+     * 흐름:
+     * 1) JWT Claim의 tenancy_code, tenancy_type, user_role이 모두 ADMIN인지 확인한다.
+     * 2) keycloakId로 로컬 사용자와 소속 정보를 함께 조회한다.
+     * 3) 상세 화면에 필요한 사용자 기본 정보와 로그인·비밀번호 변경 시각을 반환한다.
+     *
+     * 트랜잭션: 읽기 전용. 사용자 상세 정보만 조회하며 상태를 변경하지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 조회 중단.
+     * - 사용자 없음: ResponseStatusException(404), 조회 중단.
+     */
+    @Transactional(readOnly = true)
+    public UserDetail findUserDetail(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        return userRepository.findDetailByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+    }
+
+    /**
+     * 관리자 요청으로 사용자 상세 화면에서 수정 가능한 프로필 정보를 변경한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자와 변경 대상 소속 코드를 검증하고, 소속 타입을 조회한다.
+     * 3) 로컬 사용자 프로필을 갱신해 저장한다.
+     * 4) 트랜잭션 커밋 후 UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
+     * 5) 상세 조회 응답을 반환한다.
+     *
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 수정 중단.
+     * - 사용자 없음: ResponseStatusException(404), 수정 중단.
+     * - 소속 코드 없음: ResponseStatusException(400), 수정 중단.
+     * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
+     */
+    @Transactional
+    public UserDetail updateUser(Jwt jwt, UpdateUserCommand command) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(command.keycloakId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        UserTenancy tenancy = resolveTenancy(command.tenancyCode());
+
+        user.updateProfile(
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                tenancy
+        );
+        userRepository.save(user);
+        runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(command, tenancy));
+
+        return userRepository.findDetailByKeycloakId(command.keycloakId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+    }
+
+    /**
+     * 관리자 요청으로 Keycloak 사용자와 로컬 사용자를 함께 생성한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) tenancy_code가 가리키는 소속 타입과 요청 tenancy 값이 일치하는지 확인한다.
+     * 3) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
+     * 4) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     *
+     * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다. 로컬 저장 실패 시 생성된 Keycloak 사용자는 삭제를 시도한다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 생성 중단.
+     * - 소속 코드 없음 또는 타입 불일치: ResponseStatusException(400), 생성 중단.
+     * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
+     * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도.
+     */
+    @Transactional
+    public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
+        requireAdmin(jwt);
+        resolveAndValidateTenancy(command.tenancyCode(), command.tenancy());
+
+        String initialPassword = issueInitialPassword(command);
+        CreateUserIdentityCommand identityCommand = new CreateUserIdentityCommand(
+                command.employeeNumber(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                command.tenancy(),
+                initialPassword
+        );
+
+        UserIdentity identity = userIdentityManager.create(identityCommand);
+        User user = User.createPending(
+                identity.keycloakId(),
+                identity.employeeNumber(),
+                identity.email(),
+                identity.displayName(),
+                identity.tenancyCode(),
+                identity.position(),
+                identity.role(),
+                identity.tenancy()
+        );
+
+        try {
+            User savedUser = userRepository.save(user);
+            String responsePassword = command.passwordIssueMode() == PasswordIssueMode.AUTO ? initialPassword : null;
+            return new CreateUserResult(savedUser, responsePassword);
+        } catch (RuntimeException ex) {
+            try {
+                userIdentityManager.delete(identity.keycloakId());
+            } catch (RuntimeException deleteEx) {
+                ex.addSuppressed(deleteEx);
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * 관리자 요청으로 사용자의 Keycloak 비밀번호를 임시 비밀번호로 초기화한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자 존재 여부를 keycloakId로 확인한다.
+     * 3) 서버에서 임시 비밀번호를 생성한다.
+     * 4) 로컬 사용자 상태를 PENDING으로 변경해 저장한다.
+     * 5) 트랜잭션 커밋 후 Keycloak에 temporary credential로 설정한다(외부 호출).
+     *
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 초기화 중단.
+     * - 로컬 사용자 없음: ResponseStatusException(404), 초기화 중단.
+     * - Keycloak 초기화 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
+     */
+    @Transactional
+    public ResetPasswordResult resetPassword(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        String temporaryPassword = issueTemporaryPassword();
+
+        user.markPasswordResetRequired();
+        User savedUser = userRepository.save(user);
+        runAfterCommit("Keycloak 임시 비밀번호 설정", () -> userIdentityManager.resetPassword(keycloakId, temporaryPassword));
+
+        return new ResetPasswordResult(savedUser, temporaryPassword);
+    }
+
+    /**
+     * 관리자 요청으로 Keycloak 사용자의 enabled 값을 토글하고 로컬 정지 상태를 동기화한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자를 keycloakId로 조회한다.
+     * 3) UserIdentityManager로 현재 Keycloak enabled 값을 조회한다(외부 조회).
+     * 4) 반전 결과를 로컬 사용자 상태에 반영해 저장한다.
+     * 5) 트랜잭션 커밋 후 Keycloak enabled 값을 반전 결과로 변경한다(외부 호출).
+     *
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 토글 중단.
+     * - 로컬 사용자 없음: ResponseStatusException(404), 토글 중단.
+     * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
+     */
+    @Transactional
+    public User toggleSuspension(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        UserIdentityState currentState = userIdentityManager.findState(keycloakId);
+        UserIdentityState targetState = new UserIdentityState(!currentState.enabled(), currentState.passwordUpdateRequired());
+
+        user.applyIdentityState(targetState);
+        User savedUser = userRepository.save(user);
+        runAfterCommit("Keycloak enabled 상태 변경", () -> userIdentityManager.updateEnabled(keycloakId, targetState.enabled()));
+        return savedUser;
+    }
+
+    private String issueInitialPassword(CreateUserCommand command) {
+        if (command.passwordIssueMode() == PasswordIssueMode.AUTO) {
+            return issueTemporaryPassword();
+        }
+
+        return command.initialPassword();
+    }
+
+    private String issueTemporaryPassword() {
+        String generatedPassword = TemporaryPasswordGenerator.generate();
+        TemporaryPasswordPolicy.validate(generatedPassword);
+        return generatedPassword;
+    }
+
+    private User createUserFromClaims(
+            SessionClaims claims,
+            Instant loginAt,
+            String loginSessionId,
+            Instant passwordChangedAt
+    ) {
+        User user = User.create(
                 claims.keycloakId(),
                 claims.employeeNumber(),
                 claims.email(),
@@ -78,6 +337,58 @@ public class UserService {
                 claims.role(),
                 claims.tenancy()
         );
+        user.updateLastLogin(loginAt, loginSessionId);
+        user.updatePasswordChangedAt(passwordChangedAt);
+        return user;
+    }
+
+    private Instant resolveLoginAt(Jwt jwt) {
+        Instant authTime = toInstant(jwt.getClaims().get("auth_time"));
+        if (authTime != null) {
+            return authTime;
+        }
+        if (jwt.getIssuedAt() != null) {
+            return jwt.getIssuedAt();
+        }
+
+        return Instant.now();
+    }
+
+    private Instant toInstant(Object value) {
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        if (value instanceof Number number) {
+            return Instant.ofEpochSecond(number.longValue());
+        }
+        if (value instanceof Date date) {
+            return date.toInstant();
+        }
+        if (value instanceof String text) {
+            return toInstant(text);
+        }
+
+        return null;
+    }
+
+    private Instant toInstant(String value) {
+        if (!hasText(value)) {
+            return null;
+        }
+
+        try {
+            return Instant.ofEpochSecond(Long.parseLong(value));
+        } catch (NumberFormatException ignored) {
+            try {
+                return Instant.parse(value);
+            } catch (RuntimeException ex) {
+                return null;
+            }
+        }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void requireAdmin(Jwt jwt) {
@@ -104,6 +415,52 @@ public class UserService {
                         HttpStatus.FORBIDDEN,
                         "JWT tenancy_type claim is missing or unsupported"
                 ));
+    }
+
+    private UserTenancy resolveTenancy(String tenancyCode) {
+        Tenancy tenancy = tenancyRepository.findByCode(tenancyCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속을 찾을 수 없습니다."));
+
+        return UserTenancy.fromClaim(tenancy.type().name())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 소속 타입입니다."));
+    }
+
+    private UserTenancy resolveAndValidateTenancy(String tenancyCode, UserTenancy requestedTenancy) {
+        UserTenancy resolvedTenancy = resolveTenancy(tenancyCode);
+        if (resolvedTenancy != requestedTenancy) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속 코드와 소속 타입이 일치하지 않습니다.");
+        }
+
+        return resolvedTenancy;
+    }
+
+    private void runAfterCommit(String operation, Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            runWithRetry(operation, action);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                runWithRetry(operation, action);
+            }
+        });
+    }
+
+    private void runWithRetry(String operation, Runnable action) {
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= KEYCLOAK_SYNC_MAX_ATTEMPTS; attempt++) {
+            try {
+                action.run();
+                return;
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+                log.warn("{} 실패. attempt={}/{}", operation, attempt, KEYCLOAK_SYNC_MAX_ATTEMPTS, ex);
+            }
+        }
+
+        throw lastFailure;
     }
 
 }
