@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +35,9 @@ class UserServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private TenancyRepository tenancyRepository;
 
     @Mock
     private UserIdentityManager userIdentityManager;
@@ -177,6 +182,163 @@ class UserServiceTest {
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.FORBIDDEN);
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
+    }
+
+    @Test
+    void findsUserDetailWhenAccessTokenClaimsAreAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        UserDetail expected = new UserDetail(
+                targetKeycloakId,
+                "HMC0001",
+                "김정수",
+                "jskim@hyundaiparts.com",
+                "WH-BR-001",
+                "강남 1지점",
+                UserRole.BRANCH_MANAGER,
+                "MANAGER",
+                UserStatus.ACTIVE,
+                LocalDate.parse("2023-04-12"),
+                LOGIN_AT,
+                PASSWORD_CHANGED_AT,
+                LocalDateTime.parse("2023-04-12T10:30:00")
+        );
+        when(userRepository.findDetailByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(expected));
+
+        UserDetail actual = userService.findUserDetail(jwt, targetKeycloakId);
+
+        assertThat(actual).isSameAs(expected);
+        verify(userRepository).findDetailByKeycloakId(targetKeycloakId);
+    }
+
+    @Test
+    void rejectsUserDetailAccessWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+
+        assertThatThrownBy(() -> userService.findUserDetail(jwt, "target-keycloak-id"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
+    }
+
+    @Test
+    void rejectsUserDetailWhenUserDoesNotExist() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        when(userRepository.findDetailByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.findUserDetail(jwt, "missing-keycloak-id"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void updatesUserProfileInKeycloakAndLocalDatabaseWhenAdminRequests() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        UpdateUserCommand command = new UpdateUserCommand(
+                targetKeycloakId,
+                "updated@erp.com",
+                "수정 사용자",
+                "WH-BR-001",
+                "MANAGER",
+                UserRole.BRANCH_MANAGER
+        );
+        User user = User.create(
+                targetKeycloakId,
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserDetail detail = new UserDetail(
+                targetKeycloakId,
+                "HMC0001",
+                "수정 사용자",
+                "updated@erp.com",
+                "WH-BR-001",
+                "강남 1지점",
+                UserRole.BRANCH_MANAGER,
+                "MANAGER",
+                UserStatus.ACTIVE,
+                LocalDate.parse("2023-04-12"),
+                LOGIN_AT,
+                PASSWORD_CHANGED_AT,
+                LocalDateTime.parse("2023-04-12T10:30:00")
+        );
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(tenancyRepository.findByCode("WH-BR-001"))
+                .thenReturn(Optional.of(new Tenancy("WH-BR-001", "강남 1지점", TenancyType.BRANCH)));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findDetailByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(detail));
+
+        UserDetail result = userService.updateUser(jwt, command);
+
+        assertThat(result).isSameAs(detail);
+        assertThat(user.getEmail()).isEqualTo("updated@erp.com");
+        assertThat(user.getDisplayName()).isEqualTo("수정 사용자");
+        assertThat(user.getTenancyCode()).isEqualTo("WH-BR-001");
+        assertThat(user.getPosition()).isEqualTo("MANAGER");
+        assertThat(user.getRole()).isEqualTo(UserRole.BRANCH_MANAGER);
+        assertThat(user.getTenancy()).isEqualTo(UserTenancy.BRANCH);
+        verify(userIdentityManager).update(command, UserTenancy.BRANCH);
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void rejectsUpdateUserWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+
+        assertThatThrownBy(() -> userService.updateUser(jwt, updateUserCommand()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verifyNoInteractions(tenancyRepository);
+        verifyNoInteractions(userIdentityManager);
+    }
+
+    @Test
+    void rejectsUpdateUserWhenUserDoesNotExist() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateUser(jwt, command))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        verifyNoInteractions(tenancyRepository);
+        verifyNoInteractions(userIdentityManager);
+    }
+
+    @Test
+    void rejectsUpdateUserWhenTenancyCodeDoesNotExist() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(tenancyRepository.findByCode(command.tenancyCode())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.updateUser(jwt, command))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verifyNoInteractions(userIdentityManager);
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -444,6 +606,17 @@ class UserServiceTest {
                 UserTenancy.BRANCH,
                 PasswordIssueMode.AUTO,
                 null
+        );
+    }
+
+    private UpdateUserCommand updateUserCommand() {
+        return new UpdateUserCommand(
+                "target-keycloak-id",
+                "updated@erp.com",
+                "수정 사용자",
+                "WH-BR-001",
+                "MANAGER",
+                UserRole.BRANCH_MANAGER
         );
     }
 

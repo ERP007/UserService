@@ -168,6 +168,22 @@ public class User {
         return true;
     }
 
+    public void updateProfile(
+            String email,
+            String displayName,
+            String tenancyCode,
+            String position,
+            UserRole role,
+            UserTenancy tenancy
+    ) {
+        this.email = email;
+        this.displayName = displayName;
+        this.tenancyCode = tenancyCode;
+        this.position = position;
+        this.role = role;
+        this.tenancy = tenancy;
+    }
+
     public void markPasswordResetRequired() {
         this.status = UserStatus.PENDING;
     }

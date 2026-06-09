@@ -5,6 +5,8 @@ import com.fallguys.userservice.controller.dto.CreateUserResponse;
 import com.fallguys.userservice.controller.dto.ResetPasswordResponse;
 import com.fallguys.userservice.controller.dto.SessionResponse;
 import com.fallguys.userservice.controller.dto.SuspendToggleResponse;
+import com.fallguys.userservice.controller.dto.UpdateUserRequest;
+import com.fallguys.userservice.controller.dto.UserDetailResponse;
 import com.fallguys.userservice.controller.dto.UserListResponse;
 import com.fallguys.userservice.controller.dto.UserSearchRequest;
 import com.fallguys.userservice.domain.UserService;
@@ -64,6 +66,25 @@ class UserController {
 
         userService.getOrCreateUser(authenticatedJwt);
         return SessionResponse.from(authenticatedJwt);
+    }
+
+    @GetMapping("/{keycloakId}")
+    UserDetailResponse user(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String keycloakId
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return UserDetailResponse.from(userService.findUserDetail(authenticatedJwt, keycloakId));
+    }
+
+    @PatchMapping("/{keycloakId}")
+    UserDetailResponse updateUser(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String keycloakId,
+            @RequestBody UpdateUserRequest request
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return UserDetailResponse.from(userService.updateUser(authenticatedJwt, request.toCommand(keycloakId)));
     }
 
     @PostMapping("/create")

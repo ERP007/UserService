@@ -16,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final TenancyRepository tenancyRepository;
     private final UserIdentityManager userIdentityManager;
 
     /**
@@ -111,6 +112,68 @@ public class UserService {
     public UserListPage findUsers(Jwt jwt, UserSearchQuery query) {
         requireAdmin(jwt);
         return userRepository.findUsers(query);
+    }
+
+    /**
+     * 관리자 전용 사용자 상세 정보를 조회한다.
+     *
+     * 흐름:
+     * 1) JWT Claim의 tenancy_code, tenancy_type, user_role이 모두 ADMIN인지 확인한다.
+     * 2) keycloakId로 로컬 사용자와 소속 정보를 함께 조회한다.
+     * 3) 상세 화면에 필요한 사용자 기본 정보와 로그인·비밀번호 변경 시각을 반환한다.
+     *
+     * 트랜잭션: 읽기 전용. 사용자 상세 정보만 조회하며 상태를 변경하지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 조회 중단.
+     * - 사용자 없음: ResponseStatusException(404), 조회 중단.
+     */
+    @Transactional(readOnly = true)
+    public UserDetail findUserDetail(Jwt jwt, String keycloakId) {
+        requireAdmin(jwt);
+
+        return userRepository.findDetailByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+    }
+
+    /**
+     * 관리자 요청으로 사용자 상세 화면에서 수정 가능한 프로필 정보를 변경한다.
+     *
+     * 흐름:
+     * 1) JWT Claim이 관리자 권한인지 확인한다.
+     * 2) 로컬 사용자와 변경 대상 소속 코드를 검증하고, 소속 타입을 조회한다.
+     * 3) UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
+     * 4) 로컬 사용자 프로필을 같은 값으로 갱신하고 상세 조회 응답을 반환한다.
+     *
+     * 트랜잭션: 쓰기. Keycloak 수정 실패 시 로컬 DB는 변경하지 않는다. 로컬 저장 실패 시 Keycloak 변경은 자동 롤백되지 않는다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 수정 중단.
+     * - 사용자 없음: ResponseStatusException(404), 수정 중단.
+     * - 소속 코드 없음: ResponseStatusException(400), 수정 중단.
+     * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 전 중단.
+     */
+    @Transactional
+    public UserDetail updateUser(Jwt jwt, UpdateUserCommand command) {
+        requireAdmin(jwt);
+
+        User user = userRepository.findByKeycloakId(command.keycloakId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        UserTenancy tenancy = resolveTenancy(command.tenancyCode());
+
+        userIdentityManager.update(command, tenancy);
+        user.updateProfile(
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                tenancy
+        );
+        userRepository.save(user);
+
+        return userRepository.findDetailByKeycloakId(command.keycloakId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
     }
 
     /**
@@ -327,6 +390,14 @@ public class UserService {
                         HttpStatus.FORBIDDEN,
                         "JWT tenancy_type claim is missing or unsupported"
                 ));
+    }
+
+    private UserTenancy resolveTenancy(String tenancyCode) {
+        Tenancy tenancy = tenancyRepository.findByCode(tenancyCode)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속을 찾을 수 없습니다."));
+
+        return UserTenancy.fromClaim(tenancy.type().name())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 소속 타입입니다."));
     }
 
 }
