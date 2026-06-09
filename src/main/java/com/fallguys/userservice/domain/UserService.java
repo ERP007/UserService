@@ -440,7 +440,7 @@ public class UserService {
         employeeNumbers.stream()
                 .filter(this::hasText)
                 .map(String::trim)
-                .forEach(employeeNu현mber -> normalized.putIfAbsent(employeeNumberKey(employeeNumber), employeeNumber));
+                .forEach(employeeNumber -> normalized.putIfAbsent(employeeNumberKey(employeeNumber), employeeNumber));
 
         if (normalized.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번 목록을 입력해주세요.");
