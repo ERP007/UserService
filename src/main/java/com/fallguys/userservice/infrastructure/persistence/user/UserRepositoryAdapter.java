@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import com.fallguys.userservice.domain.BatchUser;
 import com.fallguys.userservice.domain.User;
 import com.fallguys.userservice.domain.UserDetail;
 import com.fallguys.userservice.domain.UserListItem;
@@ -55,6 +56,11 @@ public class UserRepositoryAdapter implements UserRepository {
                 page.hasPrevious(),
                 page.hasNext()
         );
+    }
+
+    @Override
+    public List<BatchUser> findBatchUsersByEmployeeNumbers(List<String> employeeNumbers) {
+        return userJpaDao.findBatchUsersByEmployeeNumbers(employeeNumbers);
     }
 
     @Override

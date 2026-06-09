@@ -1,7 +1,9 @@
 package com.fallguys.userservice.infrastructure.persistence.user;
 
+import java.util.List;
 import java.util.Optional;
 
+import com.fallguys.userservice.domain.BatchUser;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -22,4 +24,15 @@ public interface UserJpaDao extends JpaRepository<UserEntity, Long>, JpaSpecific
     @Override
     @EntityGraph(attributePaths = "tenancyEntity")
     Page<UserEntity> findAll(Specification<UserEntity> specification, Pageable pageable);
+
+    @Query("""
+            select new com.fallguys.userservice.domain.BatchUser(
+                u.employeeNumber,
+                u.name,
+                u.position
+            )
+            from UserEntity u
+            where lower(u.employeeNumber) in :employeeNumbers
+            """)
+    List<BatchUser> findBatchUsersByEmployeeNumbers(@Param("employeeNumbers") List<String> employeeNumbers);
 }

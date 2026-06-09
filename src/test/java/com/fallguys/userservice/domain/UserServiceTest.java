@@ -186,6 +186,49 @@ class UserServiceTest {
     }
 
     @Test
+    void findsBatchUsersInRequestOrderAndReturnsMissingEmployeeNumbers() {
+        List<String> employeeNumbers = List.of(" EMP001 ", "EMP002", "EMP003", "emp001", " ");
+        when(userRepository.findBatchUsersByEmployeeNumbers(List.of("emp001", "emp002", "emp003")))
+                .thenReturn(List.of(
+                        new BatchUser("emp002", "이영희", "과장"),
+                        new BatchUser("emp001", "김철수", "대리")
+                ));
+
+        BatchUserListResult result = userService.findBatchUsers(employeeNumbers);
+
+        assertThat(result.users())
+                .extracting(BatchUser::employeeNumber)
+                .containsExactly("emp001", "emp002");
+        assertThat(result.users())
+                .extracting(BatchUser::name)
+                .containsExactly("김철수", "이영희");
+        assertThat(result.notFoundEmployeeNumbers()).containsExactly("EMP003");
+        verify(userRepository).findBatchUsersByEmployeeNumbers(List.of("emp001", "emp002", "emp003"));
+    }
+
+    @Test
+    void rejectsBatchUserListWhenEmployeeNumbersAreBlank() {
+        assertThatThrownBy(() -> userService.findBatchUsers(List.of(" ", "")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
+    }
+
+    @Test
+    void rejectsBatchUserListWhenEmployeeNumbersExceedMaxSize() {
+        List<String> employeeNumbers = java.util.stream.IntStream.rangeClosed(1, 101)
+                .mapToObj(number -> "EMP%03d".formatted(number))
+                .toList();
+
+        assertThatThrownBy(() -> userService.findBatchUsers(employeeNumbers))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
+    }
+
+    @Test
     void findsUserDetailWhenAccessTokenClaimsAreAdmin() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
