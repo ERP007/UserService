@@ -58,6 +58,26 @@ class CreateUserRequestTest {
     }
 
     @Test
+    void rejectsAutoPasswordRequestWithInitialPassword() {
+        CreateUserRequest request = new CreateUserRequest(
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "사원",
+                "BRANCH_STAFF",
+                "BRANCH",
+                "AUTO",
+                "Temp1234!"
+        );
+
+        assertThatThrownBy(request::toCommand)
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void rejectsManualPasswordThatDoesNotSatisfyPolicy() {
         CreateUserRequest request = new CreateUserRequest(
                 "branch001",

@@ -3,6 +3,7 @@ package com.fallguys.userservice.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -342,6 +343,31 @@ class UserServiceTest {
     }
 
     @Test
+    void doesNotUpdateKeycloakWhenUpdateUserLocalSaveFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        RuntimeException failure = new RuntimeException("database write failed");
+        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(tenancyRepository.findByCode(command.tenancyCode()))
+                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
+        when(userRepository.save(user)).thenThrow(failure);
+
+        assertThatThrownBy(() -> userService.updateUser(jwt, command))
+                .isSameAs(failure);
+        verify(userIdentityManager, never()).update(any(UpdateUserCommand.class), any(UserTenancy.class));
+    }
+
+    @Test
     void createsUserInKeycloakAndLocalDatabaseWhenAdminRequests() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         CreateUserCommand command = createUserCommand();
@@ -356,7 +382,7 @@ class UserServiceTest {
                 command.tenancy(),
                 true
         );
-        when(userIdentityManager.create(command)).thenReturn(identity);
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
         when(tenancyRepository.findByCode(command.tenancyCode()))
                 .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -372,7 +398,7 @@ class UserServiceTest {
         assertThat(result.user().getRole()).isEqualTo(UserRole.BRANCH_STAFF);
         assertThat(result.user().getTenancy()).isEqualTo(UserTenancy.BRANCH);
         assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
-        verify(userIdentityManager).create(command);
+        verify(userIdentityManager).create(any(CreateUserIdentityCommand.class));
         verify(userRepository).save(any(User.class));
     }
 
@@ -382,9 +408,9 @@ class UserServiceTest {
         CreateUserCommand command = autoPasswordCreateUserCommand();
         when(tenancyRepository.findByCode(command.tenancyCode()))
                 .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
-        when(userIdentityManager.create(any(CreateUserCommand.class)))
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class)))
                 .thenAnswer(invocation -> {
-                    CreateUserCommand issuedCommand = invocation.getArgument(0);
+                    CreateUserIdentityCommand issuedCommand = invocation.getArgument(0);
                     return new UserIdentity(
                             "created-keycloak-id",
                             issuedCommand.employeeNumber(),
@@ -401,7 +427,8 @@ class UserServiceTest {
 
         CreateUserResult result = userService.createUser(jwt, command);
 
-        ArgumentCaptor<CreateUserCommand> commandCaptor = ArgumentCaptor.forClass(CreateUserCommand.class);
+        ArgumentCaptor<CreateUserIdentityCommand> commandCaptor =
+                ArgumentCaptor.forClass(CreateUserIdentityCommand.class);
         verify(userIdentityManager).create(commandCaptor.capture());
         String generatedPassword = commandCaptor.getValue().initialPassword();
         assertThat(generatedPassword)
@@ -499,6 +526,29 @@ class UserServiceTest {
     }
 
     @Test
+    void doesNotResetKeycloakPasswordWhenLocalSaveFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        RuntimeException failure = new RuntimeException("database write failed");
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.save(user)).thenThrow(failure);
+
+        assertThatThrownBy(() -> userService.resetPassword(jwt, targetKeycloakId))
+                .isSameAs(failure);
+        verify(userIdentityManager, never()).resetPassword(any(String.class), any(String.class));
+    }
+
+    @Test
     void togglesEnabledUserToSuspended() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
@@ -513,13 +563,14 @@ class UserServiceTest {
                 UserTenancy.BRANCH
         );
         when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(false, false));
+        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User result = userService.toggleSuspension(jwt, targetKeycloakId);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.SUSPENDED);
-        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userIdentityManager).updateEnabled(targetKeycloakId, false);
         verify(userRepository).save(user);
     }
 
@@ -539,13 +590,14 @@ class UserServiceTest {
         );
         user.applyIdentityState(new UserIdentityState(false, false));
         when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
+        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(false, false));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User result = userService.toggleSuspension(jwt, targetKeycloakId);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userIdentityManager).updateEnabled(targetKeycloakId, true);
         verify(userRepository).save(user);
     }
 
@@ -565,13 +617,14 @@ class UserServiceTest {
         );
         user.applyIdentityState(new UserIdentityState(false, true));
         when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(userIdentityManager.toggleEnabled(targetKeycloakId)).thenReturn(new UserIdentityState(true, true));
+        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(false, true));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         User result = userService.toggleSuspension(jwt, targetKeycloakId);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.PENDING);
-        verify(userIdentityManager).toggleEnabled(targetKeycloakId);
+        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userIdentityManager).updateEnabled(targetKeycloakId, true);
         verify(userRepository).save(user);
     }
 
@@ -585,6 +638,31 @@ class UserServiceTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).findByKeycloakId(any(String.class));
+    }
+
+    @Test
+    void doesNotUpdateKeycloakEnabledWhenLocalSaveFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "사원",
+                UserRole.BRANCH_STAFF,
+                UserTenancy.BRANCH
+        );
+        RuntimeException failure = new RuntimeException("database write failed");
+        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.save(user)).thenThrow(failure);
+
+        assertThatThrownBy(() -> userService.toggleSuspension(jwt, targetKeycloakId))
+                .isSameAs(failure);
+        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userIdentityManager, never()).updateEnabled(any(String.class), anyBoolean());
     }
 
     private UserSearchQuery userSearchQuery() {

@@ -5,15 +5,21 @@ import java.util.Date;
 import java.util.Optional;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class UserService {
+
+    private static final int KEYCLOAK_SYNC_MAX_ATTEMPTS = 3;
 
     private final UserRepository userRepository;
     private final TenancyRepository tenancyRepository;
@@ -142,16 +148,17 @@ public class UserService {
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
      * 2) 로컬 사용자와 변경 대상 소속 코드를 검증하고, 소속 타입을 조회한다.
-     * 3) UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
-     * 4) 로컬 사용자 프로필을 같은 값으로 갱신하고 상세 조회 응답을 반환한다.
+     * 3) 로컬 사용자 프로필을 갱신해 저장한다.
+     * 4) 트랜잭션 커밋 후 UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
+     * 5) 상세 조회 응답을 반환한다.
      *
-     * 트랜잭션: 쓰기. Keycloak 수정 실패 시 로컬 DB는 변경하지 않는다. 로컬 저장 실패 시 Keycloak 변경은 자동 롤백되지 않는다.
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 수정 중단.
      * - 사용자 없음: ResponseStatusException(404), 수정 중단.
      * - 소속 코드 없음: ResponseStatusException(400), 수정 중단.
-     * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 전 중단.
+     * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
     public UserDetail updateUser(Jwt jwt, UpdateUserCommand command) {
@@ -161,7 +168,6 @@ public class UserService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
         UserTenancy tenancy = resolveTenancy(command.tenancyCode());
 
-        userIdentityManager.update(command, tenancy);
         user.updateProfile(
                 command.email(),
                 command.displayName(),
@@ -171,6 +177,7 @@ public class UserService {
                 tenancy
         );
         userRepository.save(user);
+        runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(command, tenancy));
 
         return userRepository.findDetailByKeycloakId(command.keycloakId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
@@ -199,9 +206,18 @@ public class UserService {
         resolveAndValidateTenancy(command.tenancyCode(), command.tenancy());
 
         String initialPassword = issueInitialPassword(command);
-        CreateUserCommand commandWithPassword = command.withInitialPassword(initialPassword);
+        CreateUserIdentityCommand identityCommand = new CreateUserIdentityCommand(
+                command.employeeNumber(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                command.tenancy(),
+                initialPassword
+        );
 
-        UserIdentity identity = userIdentityManager.create(commandWithPassword);
+        UserIdentity identity = userIdentityManager.create(identityCommand);
         User user = User.createPending(
                 identity.keycloakId(),
                 identity.employeeNumber(),
@@ -233,15 +249,16 @@ public class UserService {
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
      * 2) 로컬 사용자 존재 여부를 keycloakId로 확인한다.
-     * 3) 서버에서 임시 비밀번호를 생성하고 Keycloak에 temporary credential로 설정한다(외부 호출).
-     * 4) 로컬 사용자 상태를 PENDING으로 변경해 다음 로그인 시 비밀번호 변경이 필요함을 반영한다.
+     * 3) 서버에서 임시 비밀번호를 생성한다.
+     * 4) 로컬 사용자 상태를 PENDING으로 변경해 저장한다.
+     * 5) 트랜잭션 커밋 후 Keycloak에 temporary credential로 설정한다(외부 호출).
      *
-     * 트랜잭션: 쓰기. Keycloak 초기화 실패 시 로컬 상태는 변경하지 않는다.
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 초기화 중단.
      * - 로컬 사용자 없음: ResponseStatusException(404), 초기화 중단.
-     * - Keycloak 초기화 실패: BusinessException 계열, 로컬 저장 전 중단.
+     * - Keycloak 초기화 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
     public ResetPasswordResult resetPassword(Jwt jwt, String keycloakId) {
@@ -251,10 +268,11 @@ public class UserService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
         String temporaryPassword = issueTemporaryPassword();
 
-        userIdentityManager.resetPassword(keycloakId, temporaryPassword);
         user.markPasswordResetRequired();
+        User savedUser = userRepository.save(user);
+        runAfterCommit("Keycloak 임시 비밀번호 설정", () -> userIdentityManager.resetPassword(keycloakId, temporaryPassword));
 
-        return new ResetPasswordResult(userRepository.save(user), temporaryPassword);
+        return new ResetPasswordResult(savedUser, temporaryPassword);
     }
 
     /**
@@ -263,15 +281,16 @@ public class UserService {
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
      * 2) 로컬 사용자를 keycloakId로 조회한다.
-     * 3) UserIdentityManager로 Keycloak enabled 값을 반전한다(외부 호출).
+     * 3) UserIdentityManager로 현재 Keycloak enabled 값을 조회한다(외부 조회).
      * 4) 반전 결과를 로컬 사용자 상태에 반영해 저장한다.
+     * 5) 트랜잭션 커밋 후 Keycloak enabled 값을 반전 결과로 변경한다(외부 호출).
      *
-     * 트랜잭션: 쓰기. Keycloak 상태 변경 실패 시 로컬 상태는 변경하지 않는다.
+     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 토글 중단.
      * - 로컬 사용자 없음: ResponseStatusException(404), 토글 중단.
-     * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 전 중단.
+     * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
     public User toggleSuspension(Jwt jwt, String keycloakId) {
@@ -279,10 +298,13 @@ public class UserService {
 
         User user = userRepository.findByKeycloakId(keycloakId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
-        UserIdentityState identityState = userIdentityManager.toggleEnabled(keycloakId);
+        UserIdentityState currentState = userIdentityManager.findState(keycloakId);
+        UserIdentityState targetState = new UserIdentityState(!currentState.enabled(), currentState.passwordUpdateRequired());
 
-        user.applyIdentityState(identityState);
-        return userRepository.save(user);
+        user.applyIdentityState(targetState);
+        User savedUser = userRepository.save(user);
+        runAfterCommit("Keycloak enabled 상태 변경", () -> userIdentityManager.updateEnabled(keycloakId, targetState.enabled()));
+        return savedUser;
     }
 
     private String issueInitialPassword(CreateUserCommand command) {
@@ -410,6 +432,35 @@ public class UserService {
         }
 
         return resolvedTenancy;
+    }
+
+    private void runAfterCommit(String operation, Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            runWithRetry(operation, action);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                runWithRetry(operation, action);
+            }
+        });
+    }
+
+    private void runWithRetry(String operation, Runnable action) {
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= KEYCLOAK_SYNC_MAX_ATTEMPTS; attempt++) {
+            try {
+                action.run();
+                return;
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+                log.warn("{} 실패. attempt={}/{}", operation, attempt, KEYCLOAK_SYNC_MAX_ATTEMPTS, ex);
+            }
+        }
+
+        throw lastFailure;
     }
 
 }

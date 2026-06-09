@@ -9,13 +9,15 @@ public interface UserIdentityManager {
 
     Optional<Instant> findPasswordChangedAt(String keycloakId);
 
-    UserIdentity create(CreateUserCommand command);
+    UserIdentity create(CreateUserIdentityCommand command);
 
     void update(UpdateUserCommand command, UserTenancy tenancy);
 
     void resetPassword(String keycloakId, String temporaryPassword);
 
-    UserIdentityState toggleEnabled(String keycloakId);
+    UserIdentityState findState(String keycloakId);
+
+    void updateEnabled(String keycloakId, boolean enabled);
 
     void delete(String keycloakId);
 }

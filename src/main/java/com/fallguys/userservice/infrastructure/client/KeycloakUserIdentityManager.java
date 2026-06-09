@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import com.fallguys.userservice.domain.CreateUserCommand;
+import com.fallguys.userservice.domain.CreateUserIdentityCommand;
 import com.fallguys.userservice.domain.UpdateUserCommand;
 import com.fallguys.userservice.domain.UserIdentity;
 import com.fallguys.userservice.domain.UserIdentityManager;
@@ -79,7 +79,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     }
 
     @Override
-    public UserIdentity create(CreateUserCommand command) {
+    public UserIdentity create(CreateUserIdentityCommand command) {
         UserRepresentation representation = toRepresentation(command);
 
         try (Response response = users().create(representation)) {
@@ -142,14 +142,24 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     }
 
     @Override
-    public UserIdentityState toggleEnabled(String keycloakId) {
+    public UserIdentityState findState(String keycloakId) {
+        try {
+            UserRepresentation representation = user(keycloakId).toRepresentation();
+            return new UserIdentityState(Boolean.TRUE.equals(representation.isEnabled()), passwordUpdateRequired(representation));
+        } catch (NotFoundException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        }
+    }
+
+    @Override
+    public void updateEnabled(String keycloakId, boolean enabled) {
         try {
             UserResource userResource = user(keycloakId);
             UserRepresentation representation = userResource.toRepresentation();
-            boolean enabled = !Boolean.TRUE.equals(representation.isEnabled()); // 현재 활성상태
             representation.setEnabled(enabled);
             userResource.update(representation);
-            return new UserIdentityState(enabled, passwordUpdateRequired(representation));
         } catch (NotFoundException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
         } catch (ProcessingException | WebApplicationException ex) {
@@ -188,7 +198,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         return response.readEntity(String.class);
     }
 
-    private UserRepresentation toRepresentation(CreateUserCommand command) {
+    private UserRepresentation toRepresentation(CreateUserIdentityCommand command) {
         UserRepresentation representation = new UserRepresentation();
         representation.setUsername(command.employeeNumber());
         representation.setEmail(command.email());
@@ -200,7 +210,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         return representation;
     }
 
-    private CredentialRepresentation passwordCredential(CreateUserCommand command) {
+    private CredentialRepresentation passwordCredential(CreateUserIdentityCommand command) {
         return passwordCredential(command.initialPassword());
     }
 
@@ -226,7 +236,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         }
     }
 
-    private Map<String, List<String>> attributes(CreateUserCommand command) {
+    private Map<String, List<String>> attributes(CreateUserIdentityCommand command) {
         Map<String, List<String>> attributes = new HashMap<>();
         attributes.put(EMPLOYEE_NUMBER, List.of(command.employeeNumber()));
         attributes.put(USER_PROFILE_NAME, List.of(command.displayName()));
@@ -263,7 +273,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         return attributes;
     }
 
-    private UserIdentity fallbackIdentity(String keycloakId, CreateUserCommand command) {
+    private UserIdentity fallbackIdentity(String keycloakId, CreateUserIdentityCommand command) {
         return new UserIdentity(
                 keycloakId,
                 command.employeeNumber(),

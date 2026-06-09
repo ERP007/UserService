@@ -1,6 +1,6 @@
 package com.fallguys.userservice.domain;
 
-public record CreateUserCommand(
+public record CreateUserIdentityCommand(
         String employeeNumber,
         String email,
         String displayName,
@@ -8,11 +8,10 @@ public record CreateUserCommand(
         String position,
         UserRole role,
         UserTenancy tenancy,
-        PasswordIssueMode passwordIssueMode,
         String initialPassword
 ) {
 
-    public CreateUserCommand {
+    public CreateUserIdentityCommand {
         employeeNumber = required(employeeNumber, "employeeNumber");
         email = required(email, "email");
         displayName = required(displayName, "displayName");
@@ -20,14 +19,8 @@ public record CreateUserCommand(
         position = normalize(position);
         role = required(role, "role");
         tenancy = required(tenancy, "tenancy");
-        passwordIssueMode = required(passwordIssueMode, "passwordIssueMode");
-        initialPassword = normalize(initialPassword);
-        if (passwordIssueMode == PasswordIssueMode.MANUAL) {
-            initialPassword = required(initialPassword, "initialPassword");
-            TemporaryPasswordPolicy.validate(initialPassword);
-        } else if (initialPassword != null) {
-            throw new IllegalArgumentException("initialPassword must be null when passwordIssueMode is AUTO");
-        }
+        initialPassword = required(initialPassword, "initialPassword");
+        TemporaryPasswordPolicy.validate(initialPassword);
     }
 
     private static String required(String value, String fieldName) {
