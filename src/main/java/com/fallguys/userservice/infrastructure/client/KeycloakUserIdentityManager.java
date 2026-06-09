@@ -46,6 +46,10 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     private static final String USER_PROFILE_ROLE = "Role";
     private static final String POSITION = "position";
     private static final String UPDATE_PASSWORD = "UPDATE_PASSWORD";
+    private static final int ERROR_SUMMARY_MAX_LENGTH = 200;
+    private static final int ERROR_SUMMARY_PREFIX_LENGTH = 40;
+    private static final int ERROR_SUMMARY_SUFFIX_LENGTH = 20;
+    private static final String MASK = "***";
 
     private final Keycloak keycloak;
     private final KeycloakAdminProperties properties;
@@ -94,7 +98,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
                 throw new UserAlreadyExistsException();
             }
 
-            log.warn("Keycloak 사용자 생성 실패. status={}, responseBody={}", status, responseBody(response));
+            log.warn("Keycloak 사용자 생성 실패. status={}, errorSummary={}", status, safeErrorSummary(response));
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_CREATE_FAILED);
         } catch (ProcessingException | WebApplicationException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_CREATE_FAILED, ex);
@@ -190,12 +194,40 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         }
     }
 
-    private String responseBody(Response response) {
+    private String safeErrorSummary(Response response) {
         if (!response.hasEntity()) {
             return "";
         }
 
-        return response.readEntity(String.class);
+        try {
+            String body = response.readEntity(String.class);
+            if (!StringUtils.hasText(body)) {
+                return "";
+            }
+
+            String normalized = body.replaceAll("\\s+", " ").trim();
+            String truncated = normalized.length() > ERROR_SUMMARY_MAX_LENGTH
+                    ? normalized.substring(0, ERROR_SUMMARY_MAX_LENGTH)
+                    : normalized;
+            return maskErrorSummary(truncated);
+        } catch (RuntimeException ex) {
+            return "[unreadable]";
+        }
+    }
+
+    private String maskErrorSummary(String value) {
+        if (value.length() <= 8) {
+            return MASK;
+        }
+
+        if (value.length() <= ERROR_SUMMARY_PREFIX_LENGTH + ERROR_SUMMARY_SUFFIX_LENGTH) {
+            int edgeLength = Math.min(4, value.length() / 3);
+            return value.substring(0, edgeLength) + MASK + value.substring(value.length() - edgeLength);
+        }
+
+        return value.substring(0, ERROR_SUMMARY_PREFIX_LENGTH)
+                + MASK
+                + value.substring(value.length() - ERROR_SUMMARY_SUFFIX_LENGTH);
     }
 
     private UserRepresentation toRepresentation(CreateUserIdentityCommand command) {
