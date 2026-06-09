@@ -3,6 +3,7 @@ package com.fallguys.userservice.controller;
 import java.time.Instant;
 
 import com.fallguys.userservice.domain.exception.BusinessException;
+import com.fallguys.userservice.domain.exception.UserAlreadyExistsException;
 import com.fallguys.userservice.domain.exception.UserIdentityException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleUserIdentity(UserIdentityException ex) {
         log.error("User identity exception. code={}", ex.getCode(), ex);
         return build(HttpStatus.BAD_GATEWAY, ex.getCode(), ex.getMessage());
+    }
+
+    @ExceptionHandler(UserAlreadyExistsException .class)
+    public ProblemDetail handleUserAlreadyExists(UserAlreadyExistsException ex) {
+        log.warn("User already exists. code={}", ex.getCode());
+        return build(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage());
     }
 
     @ExceptionHandler(BusinessException.class)
