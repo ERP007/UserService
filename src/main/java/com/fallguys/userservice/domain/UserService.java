@@ -181,19 +181,22 @@ public class UserService {
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
-     * 3) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     * 2) tenancy_code가 가리키는 소속 타입과 요청 tenancy 값이 일치하는지 확인한다.
+     * 3) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
+     * 4) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
      *
      * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다. 로컬 저장 실패 시 생성된 Keycloak 사용자는 삭제를 시도한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 생성 중단.
+     * - 소속 코드 없음 또는 타입 불일치: ResponseStatusException(400), 생성 중단.
      * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
      * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도.
      */
     @Transactional
     public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
         requireAdmin(jwt);
+        resolveAndValidateTenancy(command.tenancyCode(), command.tenancy());
 
         String initialPassword = issueInitialPassword(command);
         CreateUserCommand commandWithPassword = command.withInitialPassword(initialPassword);
@@ -398,6 +401,15 @@ public class UserService {
 
         return UserTenancy.fromClaim(tenancy.type().name())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 소속 타입입니다."));
+    }
+
+    private UserTenancy resolveAndValidateTenancy(String tenancyCode, UserTenancy requestedTenancy) {
+        UserTenancy resolvedTenancy = resolveTenancy(tenancyCode);
+        if (resolvedTenancy != requestedTenancy) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속 코드와 소속 타입이 일치하지 않습니다.");
+        }
+
+        return resolvedTenancy;
     }
 
 }
