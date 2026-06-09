@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import com.fallguys.userservice.domain.CreateUserCommand;
+import com.fallguys.userservice.domain.UpdateUserCommand;
 import com.fallguys.userservice.domain.UserIdentity;
 import com.fallguys.userservice.domain.UserIdentityManager;
 import com.fallguys.userservice.domain.UserIdentityState;
@@ -97,6 +98,22 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_CREATE_FAILED);
         } catch (ProcessingException | WebApplicationException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_CREATE_FAILED, ex);
+        }
+    }
+
+    @Override
+    public void update(UpdateUserCommand command, UserTenancy tenancy) {
+        try {
+            UserResource userResource = user(command.keycloakId());
+            UserRepresentation representation = userResource.toRepresentation();
+            representation.setEmail(command.email());
+            representation.setFirstName(command.displayName());
+            representation.setAttributes(updatedAttributes(representation, command, tenancy));
+            userResource.update(representation);
+        } catch (NotFoundException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_UPDATE_FAILED, ex);
         }
     }
 
@@ -219,6 +236,28 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         attributes.put(USER_PROFILE_ROLE, List.of(command.role().name()));
         if (StringUtils.hasText(command.position())) {
             attributes.put(POSITION, List.of(command.position()));
+        }
+
+        return attributes;
+    }
+
+    private Map<String, List<String>> updatedAttributes(
+            UserRepresentation representation,
+            UpdateUserCommand command,
+            UserTenancy tenancy
+    ) {
+        Map<String, List<String>> attributes = representation.getAttributes() == null
+                ? new HashMap<>()
+                : new HashMap<>(representation.getAttributes());
+        attributes.put(USER_PROFILE_NAME, List.of(command.displayName()));
+        attributes.put(TENANCY_CODE, List.of(command.tenancyCode()));
+        attributes.put(TENANCY_TYPE, List.of(tenancy.name()));
+        attributes.put(USER_ROLE, List.of(command.role().name()));
+        attributes.put(USER_PROFILE_ROLE, List.of(command.role().name()));
+        if (StringUtils.hasText(command.position())) {
+            attributes.put(POSITION, List.of(command.position()));
+        } else {
+            attributes.remove(POSITION);
         }
 
         return attributes;

@@ -11,6 +11,8 @@ public interface UserIdentityManager {
 
     UserIdentity create(CreateUserCommand command);
 
+    void update(UpdateUserCommand command, UserTenancy tenancy);
+
     void resetPassword(String keycloakId, String temporaryPassword);
 
     UserIdentityState toggleEnabled(String keycloakId);
