@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -374,6 +376,14 @@ class UserServiceTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
         verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
+    }
+
+    @Test
+    void keepsMyPageSynchronizationWhenAccessDenied() throws NoSuchMethodException {
+        Method method = UserService.class.getDeclaredMethod("findMyPage", Jwt.class);
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        assertThat(transactional.noRollbackFor()).contains(ResponseStatusException.class);
     }
 
     @Test
