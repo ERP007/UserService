@@ -183,6 +183,29 @@ public class UserService {
     }
 
     /**
+     * 로그인한 사용자의 마이페이지 정보를 조회한다.
+     *
+     * 흐름:
+     * 1) Gateway가 Relay한 JWT의 subject를 Keycloak ID로 사용한다.
+     * 2) Keycloak ID로 로컬 사용자와 소속 정보를 함께 조회한다.
+     * 3) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 마이페이지 표시 정보를 반환한다.
+     *
+     * 트랜잭션: 읽기 전용. 본인 정보만 조회하며 상태를 변경하지 않는다.
+     *
+     * 예외:
+     * - 로컬 사용자 없음: ResponseStatusException(404), 조회 중단.
+     * - PENDING 또는 SUSPENDED 사용자: ResponseStatusException(403), 조회 중단.
+     */
+    @Transactional(readOnly = true)
+    public UserDetail findMyPage(Jwt jwt) {
+        UserDetail user = userRepository.findDetailByKeycloakId(jwt.getSubject())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+
+        requireMyPageAccessible(user.status());
+        return user;
+    }
+
+    /**
      * 관리자 요청으로 사용자 상세 화면에서 수정 가능한 프로필 정보를 변경한다.
      *
      * 흐름:
@@ -454,6 +477,16 @@ public class UserService {
 
     private String employeeNumberKey(String employeeNumber) {
         return employeeNumber.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** User Status 값에 따른 예외 처리 */
+    private void requireMyPageAccessible(UserStatus status) {
+        if (status == UserStatus.PENDING) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "비밀번호 변경 전까지 마이페이지에 접근할 수 없습니다.");
+        }
+        if (status == UserStatus.SUSPENDED) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 사용자는 마이페이지에 접근할 수 없습니다.");
+        }
     }
 
     private void requireAdmin(Jwt jwt) {
