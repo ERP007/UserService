@@ -231,6 +231,31 @@ class UserServiceTest {
     }
 
     @Test
+    void findsInternalUserByEmployeeNumberIgnoringCase() {
+        when(userRepository.findBatchUsersByEmployeeNumbers(List.of("emp001")))
+                .thenReturn(List.of(new BatchUser("emp001", "김철수", "대리")));
+
+        BatchUser result = userService.findByEmployeeNum(" EMP001 ");
+
+        assertThat(result.employeeNumber()).isEqualTo("emp001");
+        assertThat(result.name()).isEqualTo("김철수");
+        assertThat(result.position()).isEqualTo("대리");
+        verify(userRepository).findBatchUsersByEmployeeNumbers(List.of("emp001"));
+    }
+
+    @Test
+    void rejectsInternalUserWhenEmployeeNumberDoesNotExist() {
+        when(userRepository.findBatchUsersByEmployeeNumbers(List.of("missing")))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> userService.findByEmployeeNum("missing"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        verify(userRepository).findBatchUsersByEmployeeNumbers(List.of("missing"));
+    }
+
+    @Test
     void findsUserDetailWhenAccessTokenClaimsAreAdmin() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
