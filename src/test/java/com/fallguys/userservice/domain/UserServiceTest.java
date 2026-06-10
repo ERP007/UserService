@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -280,18 +282,42 @@ class UserServiceTest {
     @Test
     void findsMyPageByAuthenticatedUserSubject() {
         Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        User user = User.create(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
         UserDetail expected = userDetail(KEYCLOAK_ID, UserStatus.ACTIVE);
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(expected));
 
         UserDetail actual = userService.findMyPage(jwt);
 
         assertThat(actual).isSameAs(expected);
+        assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
+        assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
+        assertThat(user.getPasswordChangedAt()).isEqualTo(PASSWORD_CHANGED_AT);
+        verify(userIdentityManager).findPasswordChangedAt(KEYCLOAK_ID);
+        verify(userIdentityManager).findState(KEYCLOAK_ID);
+        verify(userRepository).save(user);
         verify(userRepository).findDetailByKeycloakId(KEYCLOAK_ID);
     }
 
     @Test
     void rejectsMyPageWhenUserDoesNotExist() {
         Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, false));
         when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.findMyPage(jwt))
@@ -303,25 +329,61 @@ class UserServiceTest {
     @Test
     void rejectsMyPageWhenUserIsPending() {
         Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
-        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID))
-                .thenReturn(Optional.of(userDetail(KEYCLOAK_ID, UserStatus.PENDING)));
+        User user = User.createPending(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, true));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThatThrownBy(() -> userService.findMyPage(jwt))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
     }
 
     @Test
     void rejectsMyPageWhenUserIsSuspended() {
         Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
-        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID))
-                .thenReturn(Optional.of(userDetail(KEYCLOAK_ID, UserStatus.SUSPENDED)));
+        User user = User.create(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(false, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThatThrownBy(() -> userService.findMyPage(jwt))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
+    }
+
+    @Test
+    void keepsMyPageSynchronizationWhenAccessDenied() throws NoSuchMethodException {
+        Method method = UserService.class.getDeclaredMethod("findMyPage", Jwt.class);
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        assertThat(transactional.noRollbackFor()).contains(ResponseStatusException.class);
     }
 
     @Test
