@@ -290,6 +290,17 @@ class UserServiceTest {
     }
 
     @Test
+    void rejectsMyPageWhenUserDoesNotExist() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.findMyPage(jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void rejectsMyPageWhenUserIsPending() {
         Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
         when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID))
