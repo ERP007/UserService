@@ -208,6 +208,31 @@ public class UserService {
     }
 
     /**
+     * 사번으로 내부 서비스용 사용자 표시 정보를 단건 조회한다.
+     *
+     * 흐름:
+     * 1) 사번 1건을 기존 배치 조회 규칙과 동일하게 정규화한다.
+     * 2) 정규화된 사번으로 사용자 이름과 직급을 조회한다.
+     * 3) 조회 결과가 없으면 404로 중단한다.
+     *
+     * 트랜잭션: 읽기 전용. 내부 서비스가 담당자 표시 정보를 조회할 때 사용하며 상태를 변경하지 않는다.
+     *
+     * 예외:
+     * - 사번 누락 또는 공백: ResponseStatusException(400), 조회 중단.
+     * - 사용자 없음: ResponseStatusException(404), 조회 중단.
+     */
+    @Transactional(readOnly = true)
+    public BatchUser findByEmployeeNum(String employeeNumber) {
+        if (!hasText(employeeNumber)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번을 입력해주세요.");
+        }
+
+        return findBatchUsers(List.of(employeeNumber)).users().stream()
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+    }
+
+    /**
      * 관리자 전용 사용자 상세 정보를 조회한다.
      *
      * 흐름:
