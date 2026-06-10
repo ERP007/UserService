@@ -223,6 +223,10 @@ public class UserService {
      */
     @Transactional(readOnly = true)
     public BatchUser findByEmployeeNum(String employeeNumber) {
+        if (!hasText(employeeNumber)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번을 입력해주세요.");
+        }
+
         return findBatchUsers(List.of(employeeNumber)).users().stream()
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
