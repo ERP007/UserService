@@ -50,13 +50,17 @@ public class UserService {
      */
     @Transactional
     public User getOrCreateUser(Jwt jwt) {
+        return syncAuthenticatedUser(jwt, false);
+    }
+
+    private User syncAuthenticatedUser(Jwt jwt, boolean forcePasswordChangedSync) {
         SessionClaims claims = SessionClaims.from(jwt, resolveRole(jwt), resolveTenancy(jwt));
         Instant loginAt = resolveLoginAt(jwt);
         String loginSessionId = jwt.getClaimAsString("sid");
 
         return userRepository.findByKeycloakId(claims.keycloakId())
                 .map(user -> {
-                    Instant passwordChangedAt = shouldSyncPasswordChangedAt(user, loginSessionId)
+                    Instant passwordChangedAt = shouldSyncPasswordChangedAt(user, loginSessionId, forcePasswordChangedSync)
                             ? findPasswordChangedAt(claims.keycloakId()).orElse(null)
                             : user.getPasswordChangedAt();
                     return syncExistingSessionUser(user, claims, loginAt, loginSessionId, passwordChangedAt);
@@ -95,8 +99,9 @@ public class UserService {
         return userRepository.save(user);
     }
 
-    private boolean shouldSyncPasswordChangedAt(User user, String loginSessionId) {
-        return user.getPasswordChangedAt() == null
+    private boolean shouldSyncPasswordChangedAt(User user, String loginSessionId, boolean forcePasswordChangedSync) {
+        return forcePasswordChangedSync
+                || user.getPasswordChangedAt() == null
                 || user.getStatus() == UserStatus.PENDING
                 || !hasText(loginSessionId)
                 || !loginSessionId.equals(user.getLastLoginSessionId());
@@ -187,22 +192,30 @@ public class UserService {
      *
      * 흐름:
      * 1) Gateway가 Relay한 JWT의 subject를 Keycloak ID로 사용한다.
-     * 2) Keycloak ID로 로컬 사용자와 소속 정보를 함께 조회한다.
-     * 3) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 마이페이지 표시 정보를 반환한다.
+     * 2) 토큰 Claim, 마지막 로그인 메타데이터, Keycloak password credential 생성일을 로컬 사용자에 동기화한다.
+     * 3) Keycloak enabled/required action 상태를 확인해 로컬 사용자 상태를 보정한다.
+     * 4) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 마이페이지 표시 정보를 반환한다.
      *
-     * 트랜잭션: 읽기 전용. 본인 정보만 조회하며 상태를 변경하지 않는다.
+     * 트랜잭션: 쓰기. 마이페이지 조회 직전에 Keycloak 기준 메타데이터를 로컬 DB에 동기화한다.
      *
      * 예외:
      * - 로컬 사용자 없음: ResponseStatusException(404), 조회 중단.
+     * - Keycloak credential 또는 상태 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      * - PENDING 또는 SUSPENDED 사용자: ResponseStatusException(403), 조회 중단.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public UserDetail findMyPage(Jwt jwt) {
-        UserDetail user = userRepository.findDetailByKeycloakId(jwt.getSubject())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+        User user = syncAuthenticatedUser(jwt, true);
+        UserIdentityState identityState = userIdentityManager.findState(jwt.getSubject());
+        UserStatus statusBeforeIdentitySync = user.getStatus();
+        user.applyIdentityState(identityState);
+        if (user.getStatus() != statusBeforeIdentitySync) {
+            user = userRepository.save(user);
+        }
 
-        requireMyPageAccessible(user.status());
-        return user;
+        requireMyPageAccessible(user.getStatus());
+        return userRepository.findDetailByKeycloakId(jwt.getSubject())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
     }
 
     /**
