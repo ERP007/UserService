@@ -35,4 +35,4 @@ keycloak:
 
 logging:
   level:
-    com.fallguys.userservice.infrastructure.client.KeycloakUserIdentityManager: DEBUG
+    com.fallguys.userservice.shared.infrastructure.client.KeycloakUserIdentityManager: DEBUG
