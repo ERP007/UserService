@@ -2,14 +2,14 @@ package com.fallguys.userservice.usermanagement.controller.dto;
 
 import java.util.Locale;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.usermanagement.domain.UserSearchQuery;
 import com.fallguys.userservice.usermanagement.domain.UserSortBy;
 import com.fallguys.userservice.usermanagement.domain.UserSortDirection;
-import com.fallguys.userservice.shared.domain.model.UserStatus;
-import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
-import org.springframework.web.server.ResponseStatusException;
 
 public record UserSearchRequest(
         int page,
@@ -44,7 +44,7 @@ public record UserSearchRequest(
 
     private static int validatePage(int page) {
         if (page < MIN_PAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page must be greater than or equal to 1");
+            throw new UserException(UserErrorCode.USER_INVALID_PAGE);
         }
 
         return page;
@@ -52,7 +52,7 @@ public record UserSearchRequest(
 
     private static int validateSize(int size) {
         if (size < MIN_SIZE || size > MAX_SIZE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be between 1 and 100");
+            throw new UserException(UserErrorCode.USER_INVALID_SIZE);
         }
 
         return size;
@@ -84,13 +84,13 @@ public record UserSearchRequest(
 
     private static <T extends Enum<T>> T enumValue(String value, Class<T> enumType, String parameterName) {
         if (!StringUtils.hasText(value)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, parameterName + " is required");
+            throw new UserException(UserErrorCode.USER_REQUIRED_PARAMETER);
         }
 
         try {
             return Enum.valueOf(enumType, normalizeEnumValue(value));
         } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, parameterName + " is unsupported");
+            throw new UserException(UserErrorCode.USER_UNSUPPORTED_PARAMETER);
         }
     }
 

@@ -1,5 +1,7 @@
 package com.fallguys.userservice.shared.domain;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.query.BatchUser;
 import com.fallguys.userservice.shared.domain.query.BatchUserListResult;
 import java.util.LinkedHashMap;
@@ -8,10 +10,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
@@ -32,7 +32,7 @@ public class InternalUserService {
      * 트랜잭션: 읽기 전용. 발주 서비스 등 내부 호출자가 담당자 표시 정보를 조회할 때 사용하며 상태를 변경하지 않는다.
      *
      * 예외:
-     * - 사번 목록 누락, 전부 공백, 최대 개수 초과: ResponseStatusException(400), 조회 중단.
+     * - 사번 목록 누락, 전부 공백, 최대 개수 초과: UserException(400 매핑), 조회 중단.
      */
     @Transactional(readOnly = true)
     public BatchUserListResult findBatchUsers(List<String> employeeNumbers) {
@@ -66,23 +66,23 @@ public class InternalUserService {
      * 트랜잭션: 읽기 전용. 내부 서비스가 담당자 표시 정보를 조회할 때 사용하며 상태를 변경하지 않는다.
      *
      * 예외:
-     * - 사번 누락 또는 공백: ResponseStatusException(400), 조회 중단.
-     * - 사용자 없음: ResponseStatusException(404), 조회 중단.
+     * - 사번 누락 또는 공백: UserException(400 매핑), 조회 중단.
+     * - 사용자 없음: UserException(404 매핑), 조회 중단.
      */
     @Transactional(readOnly = true)
     public BatchUser findByEmployeeNum(String employeeNumber) {
         if (!hasText(employeeNumber)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번을 입력해주세요.");
+            throw new UserException(UserErrorCode.USER_EMPLOYEE_NUMBER_REQUIRED);
         }
 
         return findBatchUsers(List.of(employeeNumber)).users().stream()
                 .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
     }
 
     private List<String> normalizeEmployeeNumbers(List<String> employeeNumbers) {
         if (employeeNumbers == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번 목록을 입력해주세요.");
+            throw new UserException(UserErrorCode.USER_EMPLOYEE_NUMBERS_REQUIRED);
         }
 
         Map<String, String> normalized = new LinkedHashMap<>();
@@ -92,10 +92,10 @@ public class InternalUserService {
                 .forEach(employeeNumber -> normalized.putIfAbsent(employeeNumberKey(employeeNumber), employeeNumber));
 
         if (normalized.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번 목록을 입력해주세요.");
+            throw new UserException(UserErrorCode.USER_EMPLOYEE_NUMBERS_REQUIRED);
         }
         if (normalized.size() > MAX_BATCH_USER_LOOKUP_SIZE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "사번은 한 번에 최대 100개까지 조회할 수 있습니다.");
+            throw new UserException(UserErrorCode.USER_BATCH_SIZE_EXCEEDED);
         }
 
         return List.copyOf(normalized.values());

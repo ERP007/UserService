@@ -9,6 +9,8 @@ import com.fallguys.userservice.usermanagement.controller.dto.UserDetailResponse
 import com.fallguys.userservice.usermanagement.controller.dto.UserListResponse;
 import com.fallguys.userservice.usermanagement.controller.dto.UserSearchRequest;
 import com.fallguys.userservice.usermanagement.domain.UserManagementService;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,7 +25,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/users")
@@ -108,7 +109,7 @@ class UserManagementController {
 
     private Jwt requireJwt(Jwt jwt) {
         if (jwt == null || !StringUtils.hasText(jwt.getSubject())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "JWT subject is missing");
+            throw new UserException(UserErrorCode.USER_AUTHENTICATION_REQUIRED);
         }
 
         return jwt;

@@ -31,7 +31,7 @@ public class SessionService {
      *
      * 예외:
      * - subject 누락: 컨트롤러에서 이 메서드 호출 전에 차단한다.
-     * - 필수 Claim 누락 또는 미지원 값: ResponseStatusException(403), 트랜잭션 롤백.
+     * - 필수 Claim 누락 또는 미지원 값: UserException(403 매핑), 트랜잭션 롤백.
      * - Keycloak credential 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      */
     @Transactional
@@ -50,7 +50,7 @@ public class SessionService {
      * 트랜잭션: 쓰기. credential 조회 또는 저장 실패 시 동기화는 롤백된다.
      *
      * 예외:
-     * - 필수 Claim 누락 또는 미지원 값: ResponseStatusException(403), 트랜잭션 롤백.
+     * - 필수 Claim 누락 또는 미지원 값: UserException(403 매핑), 트랜잭션 롤백.
      * - Keycloak credential 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      */
     @Transactional

@@ -2,10 +2,10 @@ package com.fallguys.userservice.shared.domain;
 
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
-import org.springframework.http.HttpStatus;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.util.StringUtils;
-import org.springframework.web.server.ResponseStatusException;
 
 record SessionClaims(
         String keycloakId,
@@ -44,6 +44,6 @@ record SessionClaims(
             return claimValue;
         }
 
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "JWT " + claimName + " claim is missing");
+        throw new UserException(UserErrorCode.USER_INVALID_TOKEN_CLAIM);
     }
 }

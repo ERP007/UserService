@@ -4,12 +4,12 @@ import java.util.Locale;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fallguys.userservice.usermanagement.domain.CreateUserCommand;
-import com.fallguys.userservice.usermanagement.domain.PasswordIssueMode;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import com.fallguys.userservice.usermanagement.domain.CreateUserCommand;
+import com.fallguys.userservice.usermanagement.domain.PasswordIssueMode;
 
 public record CreateUserRequest(
         @JsonProperty("employee_no")
@@ -46,30 +46,32 @@ public record CreateUserRequest(
                     parsePasswordIssueMode(passwordIssueMode),
                     initialPassword
             );
+        } catch (UserException ex) {
+            throw ex;
         } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST, ex);
         }
     }
 
     private static UserRole parseRole(String value) {
         return UserRole.fromClaim(value)
-                .orElseThrow(() -> new IllegalArgumentException("role is missing or unsupported"));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_ROLE_UNSUPPORTED));
     }
 
     private static UserTenancy parseTenancy(String value) {
         return UserTenancy.fromClaim(value)
-                .orElseThrow(() -> new IllegalArgumentException("tenancy is missing or unsupported"));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_UNSUPPORTED_TENANCY));
     }
 
     private static PasswordIssueMode parsePasswordIssueMode(String value) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("passwordIssueMode is required");
+            throw new UserException(UserErrorCode.USER_PASSWORD_ISSUE_MODE_REQUIRED);
         }
 
         try {
             return PasswordIssueMode.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("passwordIssueMode is unsupported");
+            throw new UserException(UserErrorCode.USER_PASSWORD_ISSUE_MODE_UNSUPPORTED, ex);
         }
     }
 }

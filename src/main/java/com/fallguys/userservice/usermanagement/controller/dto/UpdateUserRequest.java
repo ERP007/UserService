@@ -2,10 +2,10 @@ package com.fallguys.userservice.usermanagement.controller.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fallguys.userservice.usermanagement.domain.UpdateUserCommand;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import com.fallguys.userservice.usermanagement.domain.UpdateUserCommand;
 
 public record UpdateUserRequest(
         String email,
@@ -29,13 +29,15 @@ public record UpdateUserRequest(
                     position,
                     parseRole(role)
             );
+        } catch (UserException ex) {
+            throw ex;
         } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST, ex);
         }
     }
 
     private static UserRole parseRole(String value) {
         return UserRole.fromClaim(value)
-                .orElseThrow(() -> new IllegalArgumentException("role is missing or unsupported"));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_ROLE_UNSUPPORTED));
     }
 }

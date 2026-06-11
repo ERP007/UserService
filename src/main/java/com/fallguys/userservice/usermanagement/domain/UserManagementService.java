@@ -3,6 +3,8 @@ package com.fallguys.userservice.usermanagement.domain;
 import com.fallguys.userservice.shared.domain.JwtClaims;
 import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.Tenancy;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
@@ -11,13 +13,11 @@ import com.fallguys.userservice.shared.domain.model.UserTenancy;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @Slf4j
@@ -41,8 +41,8 @@ public class UserManagementService {
      * 트랜잭션: 읽기 전용. 사용자 목록과 페이지 메타데이터만 조회하며 상태를 변경하지 않는다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 조회 중단.
-     * - 필수 권한 Claim 누락 또는 미지원 값: ResponseStatusException(403), 조회 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 조회 중단.
+     * - 필수 권한 Claim 누락 또는 미지원 값: UserException(403 매핑), 조회 중단.
      */
     @Transactional(readOnly = true)
     public UserListPage findUsers(Jwt jwt, UserSearchQuery query) {
@@ -61,15 +61,15 @@ public class UserManagementService {
      * 트랜잭션: 읽기 전용. 사용자 상세 정보만 조회하며 상태를 변경하지 않는다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 조회 중단.
-     * - 사용자 없음: ResponseStatusException(404), 조회 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 조회 중단.
+     * - 사용자 없음: UserException(404 매핑), 조회 중단.
      */
     @Transactional(readOnly = true)
     public UserDetail findUserDetail(Jwt jwt, String keycloakId) {
         JwtClaims.requireAdmin(jwt);
 
         return userRepository.findDetailByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
     }
 
     /**
@@ -85,9 +85,9 @@ public class UserManagementService {
      * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 수정 중단.
-     * - 사용자 없음: ResponseStatusException(404), 수정 중단.
-     * - 소속 코드 없음: ResponseStatusException(400), 수정 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 수정 중단.
+     * - 사용자 없음: UserException(404 매핑), 수정 중단.
+     * - 소속 코드 없음: UserException(400 매핑), 수정 중단.
      * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
@@ -95,7 +95,7 @@ public class UserManagementService {
         JwtClaims.requireAdmin(jwt);
 
         User user = userRepository.findByKeycloakId(command.keycloakId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
         UserTenancy tenancy = resolveTenancy(command.tenancyCode());
 
         user.updateProfile(
@@ -110,7 +110,7 @@ public class UserManagementService {
         runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(command, tenancy));
 
         return userRepository.findDetailByKeycloakId(command.keycloakId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
     }
 
     /**
@@ -125,8 +125,8 @@ public class UserManagementService {
      * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다. 로컬 저장 실패 시 생성된 Keycloak 사용자는 삭제를 시도한다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 생성 중단.
-     * - 소속 코드 없음 또는 타입 불일치: ResponseStatusException(400), 생성 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 생성 중단.
+     * - 소속 코드 없음 또는 타입 불일치: UserException(400 매핑), 생성 중단.
      * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
      * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도.
      */
@@ -186,8 +186,8 @@ public class UserManagementService {
      * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 초기화 중단.
-     * - 로컬 사용자 없음: ResponseStatusException(404), 초기화 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 초기화 중단.
+     * - 로컬 사용자 없음: UserException(404 매핑), 초기화 중단.
      * - Keycloak 초기화 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
@@ -195,7 +195,7 @@ public class UserManagementService {
         JwtClaims.requireAdmin(jwt);
 
         User user = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
         String temporaryPassword = issueTemporaryPassword();
 
         user.markPasswordResetRequired();
@@ -218,8 +218,8 @@ public class UserManagementService {
      * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: ResponseStatusException(403), 토글 중단.
-     * - 로컬 사용자 없음: ResponseStatusException(404), 토글 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 토글 중단.
+     * - 로컬 사용자 없음: UserException(404 매핑), 토글 중단.
      * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
@@ -227,7 +227,7 @@ public class UserManagementService {
         JwtClaims.requireAdmin(jwt);
 
         User user = userRepository.findByKeycloakId(keycloakId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
         UserIdentityState currentState = userIdentityManager.findState(keycloakId);
         UserIdentityState targetState = new UserIdentityState(!currentState.enabled(), currentState.passwordUpdateRequired());
 
@@ -253,16 +253,16 @@ public class UserManagementService {
 
     private UserTenancy resolveTenancy(String tenancyCode) {
         Tenancy tenancy = tenancyRepository.findByCode(tenancyCode)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속을 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_TENANCY_NOT_FOUND));
 
         return UserTenancy.fromClaim(tenancy.type().name())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 소속 타입입니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_UNSUPPORTED_TENANCY));
     }
 
     private UserTenancy resolveAndValidateTenancy(String tenancyCode, UserTenancy requestedTenancy) {
         UserTenancy resolvedTenancy = resolveTenancy(tenancyCode);
         if (resolvedTenancy != requestedTenancy) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "소속 코드와 소속 타입이 일치하지 않습니다.");
+            throw new UserException(UserErrorCode.USER_TENANCY_MISMATCH);
         }
 
         return resolvedTenancy;

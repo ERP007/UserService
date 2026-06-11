@@ -1,5 +1,7 @@
 package com.fallguys.userservice.usermanagement.domain;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
 
@@ -29,14 +31,14 @@ public record CreateUserCommand(
             initialPassword = required(initialPassword, "initialPassword");
             TemporaryPasswordPolicy.validate(initialPassword);
         } else if (initialPassword != null) {
-            throw new IllegalArgumentException("initialPassword must be null when passwordIssueMode is AUTO");
+            throw new UserException(UserErrorCode.USER_INITIAL_PASSWORD_AUTO_NOT_ALLOWED);
         }
     }
 
     private static String required(String value, String fieldName) {
         String normalized = normalize(value);
         if (normalized == null) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST);
         }
 
         return normalized;
@@ -44,7 +46,7 @@ public record CreateUserCommand(
 
     private static <T> T required(T value, String fieldName) {
         if (value == null) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST);
         }
 
         return value;

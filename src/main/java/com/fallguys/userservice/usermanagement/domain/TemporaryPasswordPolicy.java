@@ -1,5 +1,8 @@
 package com.fallguys.userservice.usermanagement.domain;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
+
 final class TemporaryPasswordPolicy {
 
     static final int MIN_LENGTH = 8;
@@ -9,9 +12,7 @@ final class TemporaryPasswordPolicy {
 
     static void validate(String password) {
         if (password == null || password.length() < MIN_LENGTH || !hasLetter(password) || !hasDigit(password)) {
-            throw new IllegalArgumentException(
-                    "initialPassword must be at least 8 characters and contain letters and digits"
-            );
+            throw new UserException(UserErrorCode.USER_TEMPORARY_PASSWORD_INVALID);
         }
     }
 

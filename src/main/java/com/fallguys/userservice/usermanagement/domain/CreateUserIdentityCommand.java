@@ -1,5 +1,7 @@
 package com.fallguys.userservice.usermanagement.domain;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
 
@@ -29,7 +31,7 @@ public record CreateUserIdentityCommand(
     private static String required(String value, String fieldName) {
         String normalized = normalize(value);
         if (normalized == null) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST);
         }
 
         return normalized;
@@ -37,7 +39,7 @@ public record CreateUserIdentityCommand(
 
     private static <T> T required(T value, String fieldName) {
         if (value == null) {
-            throw new IllegalArgumentException(fieldName + " is required");
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST);
         }
 
         return value;

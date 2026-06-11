@@ -2,16 +2,16 @@ package com.fallguys.userservice.mypage.domain;
 
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
 import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
@@ -31,14 +31,14 @@ public class MyPageService {
      * 4) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 마이페이지 표시 정보를 반환한다.
      *
      * 트랜잭션: 쓰기. 마이페이지 조회 직전에 Keycloak 기준 메타데이터를 로컬 DB에 동기화한다.
-     * 접근 차단용 ResponseStatusException은 동기화 저장을 롤백하지 않는다.
+     * 접근 차단용 UserException은 동기화 저장을 롤백하지 않는다.
      *
      * 예외:
-     * - 로컬 사용자 없음: ResponseStatusException(404), 조회 중단.
+     * - 로컬 사용자 없음: UserException(404 매핑), 조회 중단.
      * - Keycloak credential 또는 상태 조회 실패: BusinessException 계열, 트랜잭션 롤백.
-     * - PENDING 또는 SUSPENDED 사용자: ResponseStatusException(403), 조회 중단. 단, 앞선 동기화 저장은 커밋된다.
+     * - PENDING 또는 SUSPENDED 사용자: UserException(403 매핑), 조회 중단. 단, 앞선 동기화 저장은 커밋된다.
      */
-    @Transactional(noRollbackFor = ResponseStatusException.class)
+    @Transactional(noRollbackFor = UserException.class)
     public UserDetail findMyPage(Jwt jwt) {
         User user = sessionService.synchronizeSessionWithPasswordCredential(jwt);
         UserIdentityState identityState = userIdentityManager.findState(jwt.getSubject());
@@ -50,7 +50,7 @@ public class MyPageService {
 
         requireMyPageAccessible(user.getStatus());
         return userRepository.findDetailByKeycloakId(jwt.getSubject())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
     }
 
     /**
@@ -63,14 +63,14 @@ public class MyPageService {
      * 트랜잭션: 상태를 변경하지 않는다.
      *
      * 예외:
-     * - PENDING 또는 SUSPENDED 상태: ResponseStatusException(403), 마이페이지 조회 중단.
+     * - PENDING 또는 SUSPENDED 상태: UserException(403 매핑), 마이페이지 조회 중단.
      */
     private void requireMyPageAccessible(UserStatus status) {
         if (status == UserStatus.PENDING) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "비밀번호 변경 전까지 마이페이지에 접근할 수 없습니다.");
+            throw new UserException(UserErrorCode.USER_MYPAGE_PASSWORD_CHANGE_REQUIRED);
         }
         if (status == UserStatus.SUSPENDED) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "정지된 사용자는 마이페이지에 접근할 수 없습니다.");
+            throw new UserException(UserErrorCode.USER_SUSPENDED);
         }
     }
 }
