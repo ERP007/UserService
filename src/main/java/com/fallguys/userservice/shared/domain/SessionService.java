@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class SessionService {
 
-    private final SessionRepository userRepository;
+    private final SessionRepository sessionRepository;
     private final UserIdentityManager userIdentityManager;
 
     /**
@@ -63,14 +63,14 @@ public class SessionService {
         Instant loginAt = resolveLoginAt(jwt);
         String loginSessionId = jwt.getClaimAsString("sid");
 
-        return userRepository.findByKeycloakId(claims.keycloakId())
+        return sessionRepository.findByKeycloakId(claims.keycloakId())
                 .map(user -> {
                     Instant passwordChangedAt = shouldSyncPasswordChangedAt(user, loginSessionId, forcePasswordChangedSync)
                             ? findPasswordChangedAt(claims.keycloakId()).orElse(null)
                             : user.getPasswordChangedAt();
                     return syncExistingSessionUser(user, claims, loginAt, loginSessionId, passwordChangedAt);
                 })
-                .orElseGet(() -> userRepository.save(createUserFromClaims(
+                .orElseGet(() -> sessionRepository.save(createUserFromClaims(
                         claims,
                         loginAt,
                         loginSessionId,
@@ -101,7 +101,7 @@ public class SessionService {
             return user;
         }
 
-        return userRepository.save(user);
+        return sessionRepository.save(user);
     }
 
     private boolean shouldSyncPasswordChangedAt(User user, String loginSessionId, boolean forcePasswordChangedSync) {
