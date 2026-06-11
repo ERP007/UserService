@@ -2,6 +2,7 @@ package com.fallguys.userservice.mypage.domain;
 
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.User;
@@ -31,14 +32,14 @@ public class MyPageService {
      * 4) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 마이페이지 표시 정보를 반환한다.
      *
      * 트랜잭션: 쓰기. 마이페이지 조회 직전에 Keycloak 기준 메타데이터를 로컬 DB에 동기화한다.
-     * 접근 차단용 UserException은 동기화 저장을 롤백하지 않는다.
+     * 접근 차단용 UserAccessBlockedException만 동기화 저장을 롤백하지 않는다.
      *
      * 예외:
      * - 로컬 사용자 없음: UserException(404 매핑), 조회 중단.
      * - Keycloak credential 또는 상태 조회 실패: BusinessException 계열, 트랜잭션 롤백.
-     * - PENDING 또는 SUSPENDED 사용자: UserException(403 매핑), 조회 중단. 단, 앞선 동기화 저장은 커밋된다.
+     * - PENDING 또는 SUSPENDED 사용자: UserAccessBlockedException(403 매핑), 조회 중단. 단, 앞선 동기화 저장은 커밋된다.
      */
-    @Transactional(noRollbackFor = UserException.class)
+    @Transactional(noRollbackFor = UserAccessBlockedException.class)
     public UserDetail findMyPage(Jwt jwt) {
         User user = sessionService.synchronizeSessionWithPasswordCredential(jwt);
         UserIdentityState identityState = userIdentityManager.findState(jwt.getSubject());
@@ -63,14 +64,14 @@ public class MyPageService {
      * 트랜잭션: 상태를 변경하지 않는다.
      *
      * 예외:
-     * - PENDING 또는 SUSPENDED 상태: UserException(403 매핑), 마이페이지 조회 중단.
+     * - PENDING 또는 SUSPENDED 상태: UserAccessBlockedException(403 매핑), 마이페이지 조회 중단.
      */
     private void requireMyPageAccessible(UserStatus status) {
         if (status == UserStatus.PENDING) {
-            throw new UserException(UserErrorCode.USER_MYPAGE_PASSWORD_CHANGE_REQUIRED);
+            throw new UserAccessBlockedException(UserErrorCode.USER_MYPAGE_PASSWORD_CHANGE_REQUIRED);
         }
         if (status == UserStatus.SUSPENDED) {
-            throw new UserException(UserErrorCode.USER_SUSPENDED);
+            throw new UserAccessBlockedException(UserErrorCode.USER_SUSPENDED);
         }
     }
 }

@@ -18,6 +18,7 @@ import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.Tenancy;
@@ -467,7 +468,9 @@ class UserManagementServiceTest {
         Method method = MyPageService.class.getDeclaredMethod("findMyPage", Jwt.class);
         Transactional transactional = method.getAnnotation(Transactional.class);
 
-        assertThat(transactional.noRollbackFor()).contains(UserException.class);
+        assertThat(transactional.noRollbackFor())
+                .contains(UserAccessBlockedException.class)
+                .doesNotContain(UserException.class);
     }
 
     @Test
