@@ -3,13 +3,13 @@ package com.fallguys.userservice.usermanagement.controller.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fallguys.userservice.usermanagement.domain.CreateUserCommand;
-import com.fallguys.userservice.usermanagement.domain.PasswordIssueMode;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
+import com.fallguys.userservice.usermanagement.domain.CreateUserCommand;
+import com.fallguys.userservice.usermanagement.domain.PasswordIssueMode;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 class CreateUserRequestTest {
 
@@ -72,9 +72,9 @@ class CreateUserRequestTest {
         );
 
         assertThatThrownBy(request::toCommand)
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_INITIAL_PASSWORD_AUTO_NOT_ALLOWED);
     }
 
     @Test
@@ -92,8 +92,8 @@ class CreateUserRequestTest {
         );
 
         assertThatThrownBy(request::toCommand)
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_TEMPORARY_PASSWORD_INVALID);
     }
 }

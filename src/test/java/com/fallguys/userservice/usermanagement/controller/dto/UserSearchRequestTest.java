@@ -3,14 +3,14 @@ package com.fallguys.userservice.usermanagement.controller.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.usermanagement.domain.UserSearchQuery;
 import com.fallguys.userservice.usermanagement.domain.UserSortBy;
 import com.fallguys.userservice.usermanagement.domain.UserSortDirection;
-import com.fallguys.userservice.shared.domain.model.UserStatus;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 class UserSearchRequestTest {
 
@@ -75,9 +75,9 @@ class UserSearchRequestTest {
         );
 
         assertThatThrownBy(request::toQuery)
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_UNSUPPORTED_PARAMETER);
     }
 
     @Test
@@ -94,8 +94,8 @@ class UserSearchRequestTest {
         );
 
         assertThatThrownBy(request::toQuery)
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_UNSUPPORTED_PARAMETER);
     }
 }

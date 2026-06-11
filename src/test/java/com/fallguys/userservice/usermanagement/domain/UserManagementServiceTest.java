@@ -18,6 +18,8 @@ import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
+import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.Tenancy;
 import com.fallguys.userservice.shared.domain.model.TenancyType;
 import com.fallguys.userservice.shared.domain.model.User;
@@ -42,10 +44,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class UserManagementServiceTest {
@@ -82,6 +82,16 @@ class UserManagementServiceTest {
         myPageService = new MyPageService(userRepository, userIdentityManager, sessionService);
         userManagementService = new UserManagementService(userRepository, tenancyRepository, userIdentityManager);
         internalUserService = new InternalUserService(userRepository);
+    }
+
+    private void assertUserError(
+            org.assertj.core.api.ThrowableAssert.ThrowingCallable callable,
+            UserErrorCode errorCode
+    ) {
+        assertThatThrownBy(callable)
+                .isInstanceOf(UserException.class)
+                .extracting("errorCode")
+                .isEqualTo(errorCode);
     }
 
     @Test
@@ -168,10 +178,10 @@ class UserManagementServiceTest {
     void rejectsMissingSupportedUserRole() {
         Jwt jwt = jwt("admin001", "HQ", "HQ", "UNKNOWN", "과장");
 
-        assertThatThrownBy(() -> sessionService.synchronizeSession(jwt))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> sessionService.synchronizeSession(jwt),
+                UserErrorCode.USER_INVALID_TOKEN_CLAIM
+        );
     }
 
     @Test
@@ -192,10 +202,10 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "HQ_MANAGER", "부장");
         UserSearchQuery query = userSearchQuery();
 
-        assertThatThrownBy(() -> userManagementService.findUsers(jwt, query))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.findUsers(jwt, query),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
     }
 
@@ -204,10 +214,10 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "HQ", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
 
-        assertThatThrownBy(() -> userManagementService.findUsers(jwt, query))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.findUsers(jwt, query),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
     }
 
@@ -216,10 +226,10 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "HQ", "ADMIN", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
 
-        assertThatThrownBy(() -> userManagementService.findUsers(jwt, query))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.findUsers(jwt, query),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
     }
 
@@ -246,10 +256,10 @@ class UserManagementServiceTest {
 
     @Test
     void rejectsBatchUserListWhenEmployeeNumbersAreBlank() {
-        assertThatThrownBy(() -> internalUserService.findBatchUsers(List.of(" ", "")))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertUserError(
+                () -> internalUserService.findBatchUsers(List.of(" ", "")),
+                UserErrorCode.USER_EMPLOYEE_NUMBERS_REQUIRED
+        );
         verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
     }
 
@@ -259,10 +269,10 @@ class UserManagementServiceTest {
                 .mapToObj(number -> "EMP%03d".formatted(number))
                 .toList();
 
-        assertThatThrownBy(() -> internalUserService.findBatchUsers(employeeNumbers))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertUserError(
+                () -> internalUserService.findBatchUsers(employeeNumbers),
+                UserErrorCode.USER_BATCH_SIZE_EXCEEDED
+        );
         verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
     }
 
@@ -284,23 +294,23 @@ class UserManagementServiceTest {
         when(userRepository.findBatchUsersByEmployeeNumbers(List.of("missing")))
                 .thenReturn(List.of());
 
-        assertThatThrownBy(() -> internalUserService.findByEmployeeNum("missing"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertUserError(
+                () -> internalUserService.findByEmployeeNum("missing"),
+                UserErrorCode.USER_NOT_FOUND
+        );
         verify(userRepository).findBatchUsersByEmployeeNumbers(List.of("missing"));
     }
 
     @Test
     void rejectsInternalUserWhenEmployeeNumberIsNullOrBlank() {
-        assertThatThrownBy(() -> internalUserService.findByEmployeeNum(null))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThatThrownBy(() -> internalUserService.findByEmployeeNum(" "))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertUserError(
+                () -> internalUserService.findByEmployeeNum(null),
+                UserErrorCode.USER_EMPLOYEE_NUMBER_REQUIRED
+        );
+        assertUserError(
+                () -> internalUserService.findByEmployeeNum(" "),
+                UserErrorCode.USER_EMPLOYEE_NUMBER_REQUIRED
+        );
         verify(userRepository, never()).findBatchUsersByEmployeeNumbers(any());
     }
 
@@ -335,10 +345,10 @@ class UserManagementServiceTest {
     void rejectsUserDetailAccessWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
-        assertThatThrownBy(() -> userManagementService.findUserDetail(jwt, "target-keycloak-id"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.findUserDetail(jwt, "target-keycloak-id"),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
     }
 
@@ -347,10 +357,10 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         when(userRepository.findDetailByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userManagementService.findUserDetail(jwt, "missing-keycloak-id"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertUserError(
+                () -> userManagementService.findUserDetail(jwt, "missing-keycloak-id"),
+                UserErrorCode.USER_NOT_FOUND
+        );
     }
 
     @Test
@@ -394,10 +404,10 @@ class UserManagementServiceTest {
         when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, false));
         when(userRepository.findDetailByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> myPageService.findMyPage(jwt))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertUserError(
+                () -> myPageService.findMyPage(jwt),
+                UserErrorCode.USER_NOT_FOUND
+        );
     }
 
     @Test
@@ -418,10 +428,10 @@ class UserManagementServiceTest {
         when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, true));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertThatThrownBy(() -> myPageService.findMyPage(jwt))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> myPageService.findMyPage(jwt),
+                UserErrorCode.USER_MYPAGE_PASSWORD_CHANGE_REQUIRED
+        );
         assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
         verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
     }
@@ -444,10 +454,10 @@ class UserManagementServiceTest {
         when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(false, false));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertThatThrownBy(() -> myPageService.findMyPage(jwt))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> myPageService.findMyPage(jwt),
+                UserErrorCode.USER_SUSPENDED
+        );
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
         verify(userRepository, never()).findDetailByKeycloakId(any(String.class));
     }
@@ -457,7 +467,7 @@ class UserManagementServiceTest {
         Method method = MyPageService.class.getDeclaredMethod("findMyPage", Jwt.class);
         Transactional transactional = method.getAnnotation(Transactional.class);
 
-        assertThat(transactional.noRollbackFor()).contains(ResponseStatusException.class);
+        assertThat(transactional.noRollbackFor()).contains(UserException.class);
     }
 
     @Test
@@ -520,10 +530,10 @@ class UserManagementServiceTest {
     void rejectsUpdateUserWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
-        assertThatThrownBy(() -> userManagementService.updateUser(jwt, updateUserCommand()))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.updateUser(jwt, updateUserCommand()),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verify(userRepository, never()).findByKeycloakId(any(String.class));
         verifyNoInteractions(tenancyRepository);
         verifyNoInteractions(userIdentityManager);
@@ -535,10 +545,10 @@ class UserManagementServiceTest {
         UpdateUserCommand command = updateUserCommand();
         when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertUserError(
+                () -> userManagementService.updateUser(jwt, command),
+                UserErrorCode.USER_NOT_FOUND
+        );
         verifyNoInteractions(tenancyRepository);
         verifyNoInteractions(userIdentityManager);
     }
@@ -560,10 +570,10 @@ class UserManagementServiceTest {
         when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
         when(tenancyRepository.findByCode(command.tenancyCode())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertUserError(
+                () -> userManagementService.updateUser(jwt, command),
+                UserErrorCode.USER_TENANCY_NOT_FOUND
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).save(any(User.class));
     }
@@ -674,10 +684,10 @@ class UserManagementServiceTest {
         when(tenancyRepository.findByCode(command.tenancyCode()))
                 .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "본사 중앙창고", TenancyType.HQ)));
 
-        assertThatThrownBy(() -> userManagementService.createUser(jwt, command))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertUserError(
+                () -> userManagementService.createUser(jwt, command),
+                UserErrorCode.USER_TENANCY_MISMATCH
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).save(any(User.class));
     }
@@ -686,10 +696,10 @@ class UserManagementServiceTest {
     void rejectsCreateUserWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
-        assertThatThrownBy(() -> userManagementService.createUser(jwt, createUserCommand()))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.createUser(jwt, createUserCommand()),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).save(any(User.class));
     }
@@ -730,10 +740,10 @@ class UserManagementServiceTest {
     void rejectsResetPasswordWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
-        assertThatThrownBy(() -> userManagementService.resetPassword(jwt, "target-keycloak-id"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.resetPassword(jwt, "target-keycloak-id"),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).findByKeycloakId(any(String.class));
     }
@@ -743,10 +753,10 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         when(userRepository.findByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userManagementService.resetPassword(jwt, "missing-keycloak-id"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertUserError(
+                () -> userManagementService.resetPassword(jwt, "missing-keycloak-id"),
+                UserErrorCode.USER_NOT_FOUND
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).save(any(User.class));
     }
@@ -858,10 +868,10 @@ class UserManagementServiceTest {
     void rejectsToggleSuspensionWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
-        assertThatThrownBy(() -> userManagementService.toggleSuspension(jwt, "target-keycloak-id"))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("statusCode")
-                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertUserError(
+                () -> userManagementService.toggleSuspension(jwt, "target-keycloak-id"),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
         verifyNoInteractions(userIdentityManager);
         verify(userRepository, never()).findByKeycloakId(any(String.class));
     }
