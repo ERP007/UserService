@@ -4,8 +4,8 @@ import com.fallguys.userservice.shared.controller.dto.BatchUserListRequest;
 import com.fallguys.userservice.shared.controller.dto.BatchUserListResponse;
 import com.fallguys.userservice.shared.controller.dto.BatchUserItemResponse;
 import com.fallguys.userservice.shared.domain.InternalUserService;
-import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
-import com.fallguys.userservice.shared.domain.exception.UserException;
+import com.fallguys.userservice.shared.domain.exception.CommonErrorCode;
+import com.fallguys.userservice.shared.domain.exception.CommonException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -55,7 +55,7 @@ class InternalUserController {
 
     private void requireJwt(Jwt jwt) {
         if (jwt == null || !StringUtils.hasText(jwt.getSubject())) {
-            throw new UserException(UserErrorCode.USER_AUTHENTICATION_REQUIRED);
+            throw new CommonException(CommonErrorCode.AUTHENTICATION_REQUIRED);
         }
     }
 }

@@ -10,6 +10,8 @@ import com.fallguys.userservice.usermanagement.controller.dto.UserDetailResponse
 import com.fallguys.userservice.usermanagement.controller.dto.UserListResponse;
 import com.fallguys.userservice.usermanagement.controller.dto.UserSearchRequest;
 import com.fallguys.userservice.usermanagement.domain.UserManagementService;
+import com.fallguys.userservice.shared.domain.exception.CommonErrorCode;
+import com.fallguys.userservice.shared.domain.exception.CommonException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -142,7 +144,7 @@ class UserManagementController {
 
     private Jwt requireJwt(Jwt jwt) {
         if (jwt == null || !StringUtils.hasText(jwt.getSubject())) {
-            throw new UserException(UserErrorCode.USER_AUTHENTICATION_REQUIRED);
+            throw new CommonException(CommonErrorCode.AUTHENTICATION_REQUIRED);
         }
 
         return jwt;
