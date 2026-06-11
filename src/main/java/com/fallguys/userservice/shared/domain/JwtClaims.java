@@ -14,9 +14,10 @@ public final class JwtClaims {
     }
 
     public static void requireAdmin(Jwt jwt) {
-        UserRole role = role(jwt);
-        UserTenancy tenancy = tenancy(jwt);
-        String tenancyCode = jwt.getClaimAsString("tenancy_code");
+        Jwt authenticatedJwt = requireJwt(jwt);
+        UserRole role = role(authenticatedJwt);
+        UserTenancy tenancy = tenancy(authenticatedJwt);
+        String tenancyCode = authenticatedJwt.getClaimAsString("tenancy_code");
 
         if (!ADMIN_TENANCY_CODE.equals(tenancyCode) || role != UserRole.ADMIN || tenancy != UserTenancy.ADMIN) {
             throw new UserException(UserErrorCode.USER_ADMIN_REQUIRED);
@@ -24,12 +25,22 @@ public final class JwtClaims {
     }
 
     public static UserRole role(Jwt jwt) {
-        return UserRole.fromClaim(jwt.getClaimAsString("user_role"))
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return UserRole.fromClaim(authenticatedJwt.getClaimAsString("user_role"))
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_INVALID_TOKEN_CLAIM));
     }
 
     public static UserTenancy tenancy(Jwt jwt) {
-        return UserTenancy.fromClaim(jwt.getClaimAsString("tenancy_type"))
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return UserTenancy.fromClaim(authenticatedJwt.getClaimAsString("tenancy_type"))
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_INVALID_TOKEN_CLAIM));
+    }
+
+    private static Jwt requireJwt(Jwt jwt) {
+        if (jwt == null) {
+            throw new UserException(UserErrorCode.USER_INVALID_TOKEN_CLAIM);
+        }
+
+        return jwt;
     }
 }
