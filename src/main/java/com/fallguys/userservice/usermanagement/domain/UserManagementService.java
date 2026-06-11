@@ -14,6 +14,7 @@ import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -132,15 +133,18 @@ public class UserManagementService {
      * 1) JWT Claim이 관리자 권한인지 확인한다.
      * 2) tenancy_code가 가리키는 소속 타입과 요청 tenancy 값이 일치하는지 확인한다.
      * 3) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
-     * 4) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     * 4) 이후 트랜잭션이 롤백되면 생성된 Keycloak 사용자를 삭제하도록 보상 훅을 등록한다.
+     * 5) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
      *
-     * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다. 로컬 저장 실패 시 생성된 Keycloak 사용자는 삭제를 시도한다.
+     * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다.
+     * 로컬 저장 실패 또는 커밋 롤백 시 생성된 Keycloak 사용자는 삭제를 시도한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 생성 중단.
      * - 소속 코드 없음 또는 타입 불일치: UserException(400 매핑), 생성 중단.
      * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
-     * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도.
+     * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도. 삭제 실패는 suppressed로 보존한다.
+     * - 커밋 시점 롤백: afterCompletion에서 Keycloak 사용자 삭제 시도. 삭제 실패는 로그로 남긴다.
      */
     @Transactional
     public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
@@ -160,6 +164,8 @@ public class UserManagementService {
         );
 
         UserIdentity identity = userIdentityManager.create(identityCommand);
+        AtomicBoolean identityDeleted = new AtomicBoolean(false);
+        registerIdentityRollbackCleanup(identity.keycloakId(), identityDeleted);
         User user = User.createPending(
                 identity.keycloakId(),
                 identity.employeeNumber(),
@@ -176,11 +182,7 @@ public class UserManagementService {
             String responsePassword = command.passwordIssueMode() == PasswordIssueMode.AUTO ? initialPassword : null;
             return new CreateUserResult(savedUser, responsePassword);
         } catch (RuntimeException ex) {
-            try {
-                userIdentityManager.delete(identity.keycloakId());
-            } catch (RuntimeException deleteEx) {
-                ex.addSuppressed(deleteEx);
-            }
+            deleteCreatedIdentity(identity.keycloakId(), identityDeleted, ex);
             throw ex;
         }
     }
@@ -292,6 +294,38 @@ public class UserManagementService {
                 runWithRetry(operation, action);
             }
         });
+    }
+
+    private void registerIdentityRollbackCleanup(String keycloakId, AtomicBoolean identityDeleted) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    deleteCreatedIdentity(keycloakId, identityDeleted, null);
+                }
+            }
+        });
+    }
+
+    private void deleteCreatedIdentity(String keycloakId, AtomicBoolean identityDeleted, RuntimeException sourceFailure) {
+        if (!identityDeleted.compareAndSet(false, true)) {
+            return;
+        }
+
+        try {
+            userIdentityManager.delete(keycloakId);
+        } catch (RuntimeException deleteEx) {
+            if (sourceFailure != null) {
+                sourceFailure.addSuppressed(deleteEx);
+                return;
+            }
+
+            log.warn("Keycloak 생성 사용자 롤백 보상 삭제 실패. keycloakId={}", keycloakId, deleteEx);
+        }
     }
 
     private void runWithRetry(String operation, Runnable action) {

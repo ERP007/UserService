@@ -50,6 +50,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
 class UserManagementServiceTest {
@@ -689,6 +691,42 @@ class UserManagementServiceTest {
         assertThat(result.temporaryPassword()).isEqualTo(generatedPassword);
         assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
         verify(userRepository).save(any(User.class));
+    }
+
+    @Test
+    void deletesCreatedKeycloakUserWhenCreateUserTransactionRollsBackAfterLocalSave() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        UserIdentity identity = new UserIdentity(
+                "created-keycloak-id",
+                command.employeeNumber(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                command.tenancy(),
+                true
+        );
+        when(tenancyRepository.findByCode(command.tenancyCode()))
+                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            CreateUserResult result = userManagementService.createUser(jwt, command);
+            assertThat(result.user().getKeycloakId()).isEqualTo("created-keycloak-id");
+
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations).hasSize(1);
+            synchronizations.forEach(synchronization ->
+                    synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        verify(userIdentityManager).delete("created-keycloak-id");
     }
 
     @Test
