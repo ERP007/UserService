@@ -1,12 +1,11 @@
-package com.fallguys.userservice.usermanagement.domain;
+package com.fallguys.userservice.shared.domain.command;
 
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
-import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
 
-public record CreateUserCommand(
+public record CreateUserIdentityCommand(
         String employeeNumber,
         String email,
         String displayName,
@@ -14,11 +13,10 @@ public record CreateUserCommand(
         String position,
         UserRole role,
         UserTenancy tenancy,
-        PasswordIssueMode passwordIssueMode,
         String initialPassword
 ) {
 
-    public CreateUserCommand {
+    public CreateUserIdentityCommand {
         employeeNumber = required(employeeNumber, "employeeNumber");
         email = required(email, "email");
         displayName = required(displayName, "displayName");
@@ -26,14 +24,8 @@ public record CreateUserCommand(
         position = normalize(position);
         role = required(role, "role");
         tenancy = required(tenancy, "tenancy");
-        passwordIssueMode = required(passwordIssueMode, "passwordIssueMode");
-        initialPassword = normalize(initialPassword);
-        if (passwordIssueMode == PasswordIssueMode.MANUAL) {
-            initialPassword = required(initialPassword, "initialPassword");
-            TemporaryPasswordPolicy.validate(initialPassword);
-        } else if (initialPassword != null) {
-            throw new UserException(UserErrorCode.USER_INITIAL_PASSWORD_AUTO_NOT_ALLOWED);
-        }
+        initialPassword = required(initialPassword, "initialPassword");
+        TemporaryPasswordPolicy.validate(initialPassword);
     }
 
     private static String required(String value, String fieldName) {

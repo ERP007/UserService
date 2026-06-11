@@ -1,16 +1,16 @@
-package com.fallguys.userservice.usermanagement.domain;
+package com.fallguys.userservice.shared.domain.command;
 
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 
-final class TemporaryPasswordPolicy {
+public final class TemporaryPasswordPolicy {
 
-    static final int MIN_LENGTH = 8;
+    public static final int MIN_LENGTH = 8;
 
     private TemporaryPasswordPolicy() {
     }
 
-    static void validate(String password) {
+    public static void validate(String password) {
         if (password == null || password.length() < MIN_LENGTH || !hasLetter(password) || !hasDigit(password)) {
             throw new UserException(UserErrorCode.USER_TEMPORARY_PASSWORD_INVALID);
         }

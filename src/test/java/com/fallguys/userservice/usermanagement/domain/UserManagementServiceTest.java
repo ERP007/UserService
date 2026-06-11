@@ -18,6 +18,9 @@ import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
+import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
+import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
@@ -525,7 +528,15 @@ class UserManagementServiceTest {
         assertThat(user.getPosition()).isEqualTo("MANAGER");
         assertThat(user.getRole()).isEqualTo(UserRole.BRANCH_MANAGER);
         assertThat(user.getTenancy()).isEqualTo(UserTenancy.BRANCH);
-        verify(userIdentityManager).update(command, UserTenancy.BRANCH);
+        verify(userIdentityManager).update(new UpdateUserIdentityCommand(
+                command.keycloakId(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                UserTenancy.BRANCH
+        ));
         verify(userRepository).save(user);
     }
 
@@ -603,7 +614,7 @@ class UserManagementServiceTest {
 
         assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
                 .isSameAs(failure);
-        verify(userIdentityManager, never()).update(any(UpdateUserCommand.class), any(UserTenancy.class));
+        verify(userIdentityManager, never()).update(any(UpdateUserIdentityCommand.class));
     }
 
     @Test

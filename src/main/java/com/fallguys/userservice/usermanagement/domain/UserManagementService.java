@@ -3,6 +3,9 @@ package com.fallguys.userservice.usermanagement.domain;
 import com.fallguys.userservice.shared.domain.JwtClaims;
 import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
+import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
+import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.Tenancy;
@@ -107,7 +110,16 @@ public class UserManagementService {
                 tenancy
         );
         userRepository.save(user);
-        runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(command, tenancy));
+        UpdateUserIdentityCommand identityCommand = new UpdateUserIdentityCommand(
+                command.keycloakId(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.position(),
+                command.role(),
+                tenancy
+        );
+        runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(identityCommand));
 
         return userRepository.findDetailByKeycloakId(command.keycloakId())
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));

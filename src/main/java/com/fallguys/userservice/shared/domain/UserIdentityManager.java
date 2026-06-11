@@ -2,9 +2,8 @@ package com.fallguys.userservice.shared.domain;
 
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
-import com.fallguys.userservice.shared.domain.model.UserTenancy;
-import com.fallguys.userservice.usermanagement.domain.CreateUserIdentityCommand;
-import com.fallguys.userservice.usermanagement.domain.UpdateUserCommand;
+import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
+import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -16,7 +15,7 @@ public interface UserIdentityManager {
 
     UserIdentity create(CreateUserIdentityCommand command);
 
-    void update(UpdateUserCommand command, UserTenancy tenancy);
+    void update(UpdateUserIdentityCommand command);
 
     void resetPassword(String keycloakId, String temporaryPassword);
 
