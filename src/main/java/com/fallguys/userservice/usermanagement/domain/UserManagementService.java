@@ -220,35 +220,45 @@ public class UserManagementService {
     }
 
     /**
-     * 관리자 요청으로 Keycloak 사용자의 enabled 값을 토글하고 로컬 정지 상태를 동기화한다.
+     * 관리자 요청으로 사용자 정지 여부를 명시적으로 변경한다.
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) 로컬 사용자를 keycloakId로 조회한다.
-     * 3) UserIdentityManager로 현재 Keycloak enabled 값을 조회한다(외부 조회).
-     * 4) 반전 결과를 로컬 사용자 상태에 반영해 저장한다.
-     * 5) 트랜잭션 커밋 후 Keycloak enabled 값을 반전 결과로 변경한다(외부 호출).
+     * 2) 로컬 사용자 row를 쓰기 잠금으로 조회해 같은 사용자에 대한 동시 상태 변경을 직렬화한다.
+     * 3) suspended 요청값으로 Keycloak enabled 목표값을 계산한다.
+     * 4) 정지 해제 요청이면 Keycloak required action을 조회해 PENDING/ACTIVE 복귀 상태를 결정한다(외부 조회).
+     * 5) 목표 상태를 로컬 사용자에 반영해 저장한다.
+     * 6) 트랜잭션 커밋 후 Keycloak enabled 값을 목표값으로 변경한다(외부 호출).
      *
-     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
+     * 트랜잭션: 쓰기. 사용자 row 잠금은 커밋/롤백 시 해제되며, 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
-     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 토글 중단.
-     * - 로컬 사용자 없음: UserException(404 매핑), 토글 중단.
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 상태 변경 중단.
+     * - 로컬 사용자 없음: UserException(404 매핑), 상태 변경 중단.
      * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
-    public User toggleSuspension(Jwt jwt, String keycloakId) {
+    public User updateSuspension(Jwt jwt, String keycloakId, boolean suspended) {
         JwtClaims.requireAdmin(jwt);
 
-        User user = userRepository.findByKeycloakId(keycloakId)
+        User user = userRepository.findByKeycloakIdForUpdate(keycloakId)
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
-        UserIdentityState currentState = userIdentityManager.findState(keycloakId);
-        UserIdentityState targetState = new UserIdentityState(!currentState.enabled(), currentState.passwordUpdateRequired());
+        boolean targetEnabled = !suspended;
+        UserIdentityState targetState = suspensionTargetState(keycloakId, targetEnabled);
 
         user.applyIdentityState(targetState);
         User savedUser = userRepository.save(user);
         runAfterCommit("Keycloak enabled 상태 변경", () -> userIdentityManager.updateEnabled(keycloakId, targetState.enabled()));
         return savedUser;
+    }
+
+    private UserIdentityState suspensionTargetState(String keycloakId, boolean targetEnabled) {
+        if (!targetEnabled) {
+            return new UserIdentityState(false, false);
+        }
+
+        UserIdentityState currentState = userIdentityManager.findState(keycloakId);
+        return new UserIdentityState(true, currentState.passwordUpdateRequired());
     }
 
     private String issueInitialPassword(CreateUserCommand command) {

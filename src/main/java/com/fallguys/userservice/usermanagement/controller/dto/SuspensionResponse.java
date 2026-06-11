@@ -2,7 +2,7 @@ package com.fallguys.userservice.usermanagement.controller.dto;
 
 import com.fallguys.userservice.shared.domain.model.User;
 
-public record SuspendToggleResponse(
+public record SuspensionResponse(
         String userId,
         String employeeNo,
         String email,
@@ -10,8 +10,8 @@ public record SuspendToggleResponse(
         String status
 ) {
 
-    public static SuspendToggleResponse from(User user) {
-        return new SuspendToggleResponse(
+    public static SuspensionResponse from(User user) {
+        return new SuspensionResponse(
                 user.getKeycloakId(),
                 user.getEmployeeNumber(),
                 user.getEmail(),

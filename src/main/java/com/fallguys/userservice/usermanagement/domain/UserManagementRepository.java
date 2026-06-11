@@ -8,6 +8,8 @@ public interface UserManagementRepository {
 
     Optional<User> findByKeycloakId(String keycloakId);
 
+    Optional<User> findByKeycloakIdForUpdate(String keycloakId);
+
     Optional<UserDetail> findDetailByKeycloakId(String keycloakId);
 
     UserListPage findUsers(UserSearchQuery query);

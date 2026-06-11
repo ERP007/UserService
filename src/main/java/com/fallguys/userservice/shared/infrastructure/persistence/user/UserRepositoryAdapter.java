@@ -38,6 +38,11 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
     }
 
     @Override
+    public Optional<User> findByKeycloakIdForUpdate(String keycloakId) {
+        return userJpaDao.findByKeycloakIdForUpdate(keycloakId).map(UserEntity::toDomain);
+    }
+
+    @Override
     public Optional<UserDetail> findDetailByKeycloakId(String keycloakId) {
         return userJpaDao.findDetailByKeycloakId(keycloakId)
                 .map(this::toDetail);

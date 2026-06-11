@@ -3,7 +3,8 @@ package com.fallguys.userservice.usermanagement.controller;
 import com.fallguys.userservice.usermanagement.controller.dto.CreateUserRequest;
 import com.fallguys.userservice.usermanagement.controller.dto.CreateUserResponse;
 import com.fallguys.userservice.usermanagement.controller.dto.ResetPasswordResponse;
-import com.fallguys.userservice.usermanagement.controller.dto.SuspendToggleResponse;
+import com.fallguys.userservice.usermanagement.controller.dto.SuspensionRequest;
+import com.fallguys.userservice.usermanagement.controller.dto.SuspensionResponse;
 import com.fallguys.userservice.usermanagement.controller.dto.UpdateUserRequest;
 import com.fallguys.userservice.usermanagement.controller.dto.UserDetailResponse;
 import com.fallguys.userservice.usermanagement.controller.dto.UserListResponse;
@@ -98,13 +99,26 @@ class UserManagementController {
         return ResetPasswordResponse.from(userManagementService.resetPassword(authenticatedJwt, keycloakId));
     }
 
-    @PatchMapping("/{keycloakId}/suspendToggle")
-    SuspendToggleResponse suspendToggle(
+    @PatchMapping("/{keycloakId}/suspension")
+    SuspensionResponse updateSuspension(
             @AuthenticationPrincipal Jwt jwt,
-            @PathVariable String keycloakId
+            @PathVariable String keycloakId,
+            @RequestBody SuspensionRequest request
     ) {
         Jwt authenticatedJwt = requireJwt(jwt);
-        return SuspendToggleResponse.from(userManagementService.toggleSuspension(authenticatedJwt, keycloakId));
+        return SuspensionResponse.from(userManagementService.updateSuspension(
+                authenticatedJwt,
+                keycloakId,
+                requiredSuspended(request)
+        ));
+    }
+
+    private boolean requiredSuspended(SuspensionRequest request) {
+        if (request == null) {
+            throw new UserException(UserErrorCode.USER_INVALID_REQUEST);
+        }
+
+        return request.requiredSuspended();
     }
 
     private Jwt requireJwt(Jwt jwt) {

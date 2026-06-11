@@ -837,7 +837,7 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void togglesEnabledUserToSuspended() {
+    void suspendsUserWhenSuspendedRequestIsTrue() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
         User user = User.create(
@@ -850,20 +850,20 @@ class UserManagementServiceTest {
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
         );
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userManagementService.toggleSuspension(jwt, targetKeycloakId);
+        User result = userManagementService.updateSuspension(jwt, targetKeycloakId, true);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.SUSPENDED);
-        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
+        verify(userIdentityManager, never()).findState(any(String.class));
         verify(userIdentityManager).updateEnabled(targetKeycloakId, false);
         verify(userRepository).save(user);
     }
 
     @Test
-    void togglesSuspendedUserToActiveWhenPasswordUpdateIsNotRequired() {
+    void activatesSuspendedUserWhenSuspendedRequestIsFalseAndPasswordUpdateIsNotRequired() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
         User user = User.create(
@@ -877,20 +877,21 @@ class UserManagementServiceTest {
                 UserTenancy.BRANCH
         );
         user.applyIdentityState(new UserIdentityState(false, false));
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(false, false));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userManagementService.toggleSuspension(jwt, targetKeycloakId);
+        User result = userManagementService.updateSuspension(jwt, targetKeycloakId, false);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
         verify(userIdentityManager).findState(targetKeycloakId);
         verify(userIdentityManager).updateEnabled(targetKeycloakId, true);
         verify(userRepository).save(user);
     }
 
     @Test
-    void togglesSuspendedUserToPendingWhenPasswordUpdateIsRequired() {
+    void marksSuspendedUserPendingWhenSuspendedRequestIsFalseAndPasswordUpdateIsRequired() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
         User user = User.createPending(
@@ -904,28 +905,29 @@ class UserManagementServiceTest {
                 UserTenancy.BRANCH
         );
         user.applyIdentityState(new UserIdentityState(false, true));
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(false, true));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User result = userManagementService.toggleSuspension(jwt, targetKeycloakId);
+        User result = userManagementService.updateSuspension(jwt, targetKeycloakId, false);
 
         assertThat(result.getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
         verify(userIdentityManager).findState(targetKeycloakId);
         verify(userIdentityManager).updateEnabled(targetKeycloakId, true);
         verify(userRepository).save(user);
     }
 
     @Test
-    void rejectsToggleSuspensionWhenRequesterIsNotAdmin() {
+    void rejectsUpdateSuspensionWhenRequesterIsNotAdmin() {
         Jwt jwt = jwt("branch001", "BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
 
         assertUserError(
-                () -> userManagementService.toggleSuspension(jwt, "target-keycloak-id"),
+                () -> userManagementService.updateSuspension(jwt, "target-keycloak-id", true),
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
         verifyNoInteractions(userIdentityManager);
-        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verify(userRepository, never()).findByKeycloakIdForUpdate(any(String.class));
     }
 
     @Test
@@ -943,13 +945,13 @@ class UserManagementServiceTest {
                 UserTenancy.BRANCH
         );
         RuntimeException failure = new RuntimeException("database write failed");
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(userIdentityManager.findState(targetKeycloakId)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenThrow(failure);
 
-        assertThatThrownBy(() -> userManagementService.toggleSuspension(jwt, targetKeycloakId))
+        assertThatThrownBy(() -> userManagementService.updateSuspension(jwt, targetKeycloakId, true))
                 .isSameAs(failure);
-        verify(userIdentityManager).findState(targetKeycloakId);
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
+        verify(userIdentityManager, never()).findState(any(String.class));
         verify(userIdentityManager, never()).updateEnabled(any(String.class), anyBoolean());
     }
 
