@@ -33,6 +33,12 @@ keycloak:
     connect-timeout: ${KEYCLOAK_ADMIN_CONNECT_TIMEOUT:3s}
     read-timeout: ${KEYCLOAK_ADMIN_READ_TIMEOUT:10s}
 
+springdoc:
+  api-docs:
+    path: /users/v3/api-docs
+  swagger-ui:
+    path: /users/swagger-ui.html
+
 logging:
   level:
     com.fallguys.userservice.shared.infrastructure.client.KeycloakUserIdentityManager: DEBUG
