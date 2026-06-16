@@ -10,9 +10,12 @@ public record SessionResponse(
     public static SessionResponse from(Jwt jwt) {
         String employeeNumber = jwt.getClaimAsString("employee_no");
         String name = claimOrDefault(jwt, "name", employeeNumber);
+        String tenancyCode = jwt.getClaimAsString("tenancy_code");
+        String tenancyName = claimOrDefault(jwt, "tenancy_name", tenancyCode);
 
         return new SessionResponse(new SessionContentResponse(
-                jwt.getClaimAsString("tenancy_code"),
+                tenancyCode,
+                tenancyName,
                 jwt.getClaimAsString("tenancy_type"),
                 jwt.getClaimAsString("user_role"),
                 jwt.getClaimAsString("position"),

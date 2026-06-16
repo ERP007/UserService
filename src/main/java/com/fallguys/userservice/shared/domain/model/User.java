@@ -17,6 +17,7 @@ public class User {
     private String email;
     private String displayName;
     private String tenancyCode;
+    private String tenancyName;
     private String position;
     private UserRole role;
     private UserTenancy tenancy;
@@ -31,6 +32,7 @@ public class User {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy
@@ -42,6 +44,7 @@ public class User {
                 email,
                 displayName,
                 tenancyCode,
+                tenancyNameOrCode(tenancyName, tenancyCode),
                 position,
                 role,
                 tenancy,
@@ -58,6 +61,7 @@ public class User {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy
@@ -69,6 +73,7 @@ public class User {
                 email,
                 displayName,
                 tenancyCode,
+                tenancyNameOrCode(tenancyName, tenancyCode),
                 position,
                 role,
                 tenancy,
@@ -86,6 +91,7 @@ public class User {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy,
@@ -101,6 +107,7 @@ public class User {
                 email,
                 displayName,
                 tenancyCode,
+                tenancyNameOrCode(tenancyName, tenancyCode),
                 position,
                 role,
                 tenancy,
@@ -116,14 +123,17 @@ public class User {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy
     ) {
+        String nextTenancyName = updatedTenancyName(tenancyName, tenancyCode);
         boolean changed = !Objects.equals(this.employeeNumber, employeeNumber)
                 || !Objects.equals(this.email, email)
                 || !Objects.equals(this.displayName, displayName)
                 || !Objects.equals(this.tenancyCode, tenancyCode)
+                || !Objects.equals(this.tenancyName, nextTenancyName)
                 || !Objects.equals(this.position, position)
                 || this.role != role
                 || this.tenancy != tenancy
@@ -133,6 +143,7 @@ public class User {
         this.email = email;
         this.displayName = displayName;
         this.tenancyCode = tenancyCode;
+        this.tenancyName = nextTenancyName;
         this.position = position;
         this.role = role;
         this.tenancy = tenancy;
@@ -172,6 +183,7 @@ public class User {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy
@@ -179,6 +191,7 @@ public class User {
         this.email = email;
         this.displayName = displayName;
         this.tenancyCode = tenancyCode;
+        this.tenancyName = tenancyNameOrCode(tenancyName, tenancyCode);
         this.position = position;
         this.role = role;
         this.tenancy = tenancy;
@@ -199,7 +212,26 @@ public class User {
                 : UserStatus.ACTIVE;
     }
 
-    private boolean hasText(String value) {
+    private static String tenancyNameOrCode(String tenancyName, String tenancyCode) {
+        if (hasText(tenancyName)) {
+            return tenancyName.trim();
+        }
+
+        return tenancyCode;
+    }
+
+    private String updatedTenancyName(String tenancyName, String tenancyCode) {
+        if (hasText(tenancyName)) {
+            return tenancyName.trim();
+        }
+        if (Objects.equals(this.tenancyCode, tenancyCode) && hasText(this.tenancyName)) {
+            return this.tenancyName;
+        }
+
+        return tenancyCode;
+    }
+
+    private static boolean hasText(String value) {
         return value != null && !value.isBlank();
     }
 }

@@ -13,20 +13,24 @@ record SessionClaims(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
         UserRole role,
         UserTenancy tenancy
 ) {
 
-    static SessionClaims from(Jwt jwt, UserRole role, UserTenancy tenancy) {
+    static SessionClaims from(Jwt jwt, UserRole role) {
         String keycloakId = jwt.getSubject();
         String employeeNumber = requiredClaim(jwt, "employee_no");
         String email = jwt.getClaimAsString("email");
         String name = claimOrDefault(jwt, "name", employeeNumber);
         String tenancyCode = requiredClaim(jwt, "tenancy_code");
+        String tenancyName = jwt.getClaimAsString("tenancy_name");
+        UserTenancy tenancy = UserTenancy.fromClaim(jwt.getClaimAsString("tenancy_type"))
+                .orElse(null);
         String position = jwt.getClaimAsString("position");
 
-        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, position, role, tenancy);
+        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, tenancyName, position, role, tenancy);
     }
 
     private static String claimOrDefault(Jwt jwt, String claimName, String defaultValue) {

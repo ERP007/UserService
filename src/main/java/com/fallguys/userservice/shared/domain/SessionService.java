@@ -31,7 +31,7 @@ public class SessionService {
      *
      * 예외:
      * - subject 누락: 컨트롤러에서 이 메서드 호출 전에 차단한다.
-     * - 필수 Claim 누락 또는 미지원 값: UserException(403 매핑), 트랜잭션 롤백.
+     * - 필수 Claim(employee_no, tenancy_code) 누락 또는 미지원 Role: UserException(403 매핑), 트랜잭션 롤백.
      * - Keycloak credential 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      */
     @Transactional
@@ -50,7 +50,7 @@ public class SessionService {
      * 트랜잭션: 쓰기. credential 조회 또는 저장 실패 시 동기화는 롤백된다.
      *
      * 예외:
-     * - 필수 Claim 누락 또는 미지원 값: UserException(403 매핑), 트랜잭션 롤백.
+     * - 필수 Claim(employee_no, tenancy_code) 누락 또는 미지원 Role: UserException(403 매핑), 트랜잭션 롤백.
      * - Keycloak credential 조회 실패: BusinessException 계열, 트랜잭션 롤백.
      */
     @Transactional
@@ -59,7 +59,7 @@ public class SessionService {
     }
 
     private User synchronizeAuthenticatedUser(Jwt jwt, boolean forcePasswordChangedSync) {
-        SessionClaims claims = SessionClaims.from(jwt, JwtClaims.role(jwt), JwtClaims.tenancy(jwt));
+        SessionClaims claims = SessionClaims.from(jwt, JwtClaims.role(jwt));
         Instant loginAt = resolveLoginAt(jwt);
         String loginSessionId = jwt.getClaimAsString("sid");
 
@@ -90,6 +90,7 @@ public class SessionService {
                 claims.email(),
                 claims.displayName(),
                 claims.tenancyCode(),
+                claims.tenancyName(),
                 claims.position(),
                 claims.role(),
                 claims.tenancy()
@@ -128,6 +129,7 @@ public class SessionService {
                 claims.email(),
                 claims.displayName(),
                 claims.tenancyCode(),
+                claims.tenancyName(),
                 claims.position(),
                 claims.role(),
                 claims.tenancy()

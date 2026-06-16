@@ -3,14 +3,17 @@ package com.fallguys.userservice.usermanagement.domain;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserTenancy;
 
 public record UpdateUserCommand(
         String keycloakId,
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
-        UserRole role
+        UserRole role,
+        UserTenancy tenancy
 ) {
 
     public UpdateUserCommand {
@@ -18,8 +21,10 @@ public record UpdateUserCommand(
         email = required(email, "email");
         displayName = required(displayName, "displayName");
         tenancyCode = required(tenancyCode, "tenancyCode");
+        tenancyName = defaultToTenancyCode(tenancyName, tenancyCode);
         position = normalize(position);
         role = required(role, "role");
+        tenancy = tenancy == null ? UserTenancy.fromRole(role) : tenancy;
     }
 
     private static String required(String value, String fieldName) {
@@ -45,5 +50,10 @@ public record UpdateUserCommand(
         }
 
         return value.trim();
+    }
+
+    private static String defaultToTenancyCode(String tenancyName, String tenancyCode) {
+        String normalized = normalize(tenancyName);
+        return normalized == null ? tenancyCode : normalized;
     }
 }

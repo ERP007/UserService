@@ -19,11 +19,6 @@ class JwtClaimsTest {
         assertInvalidTokenClaim(() -> JwtClaims.role(null));
     }
 
-    @Test
-    void rejectsNullJwtWhenTenancyRequested() {
-        assertInvalidTokenClaim(() -> JwtClaims.tenancy(null));
-    }
-
     private void assertInvalidTokenClaim(ThrowableAssert.ThrowingCallable callable) {
         assertThatThrownBy(callable)
                 .isInstanceOf(UserException.class)

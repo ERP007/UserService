@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserTenancy;
 import com.fallguys.userservice.usermanagement.domain.UpdateUserCommand;
 
 public record UpdateUserRequest(
@@ -15,19 +16,26 @@ public record UpdateUserRequest(
         @JsonProperty("tenancy_code")
         @JsonAlias("tenancyCode")
         String tenancyCode,
+        @JsonProperty("tenancy_name")
+        @JsonAlias("tenancyName")
+        String tenancyName,
         String position,
-        String role
+        String role,
+        String tenancy
 ) {
 
     public UpdateUserCommand toCommand(String keycloakId) {
         try {
+            UserRole parsedRole = parseRole(role);
             return new UpdateUserCommand(
                     keycloakId,
                     email,
                     displayName,
                     tenancyCode,
+                    tenancyName,
                     position,
-                    parseRole(role)
+                    parsedRole,
+                    parseTenancy(tenancy, parsedRole)
             );
         } catch (UserException ex) {
             throw ex;
@@ -39,5 +47,13 @@ public record UpdateUserRequest(
     private static UserRole parseRole(String value) {
         return UserRole.fromClaim(value)
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_ROLE_UNSUPPORTED));
+    }
+
+    private static UserTenancy parseTenancy(
+            String value,
+            UserRole role
+    ) {
+        return UserTenancy.fromClaim(value)
+                .orElseGet(() -> UserTenancy.fromRole(role));
     }
 }

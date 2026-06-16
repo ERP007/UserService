@@ -133,7 +133,7 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
                 entity.getEmployeeNumber(),
                 entity.getName(),
                 entity.getEmail(),
-                tenancyName(entity),
+                displayTenancyName(entity),
                 entity.getRole(),
                 entity.getStatus(),
                 joinedAt(entity)
@@ -147,7 +147,7 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
                 entity.getName(),
                 entity.getEmail(),
                 entity.getTenancyCode(),
-                tenancyName(entity),
+                displayTenancyName(entity),
                 entity.getRole(),
                 entity.getPosition(),
                 entity.getStatus(),
@@ -158,12 +158,12 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
         );
     }
 
-    private String tenancyName(UserEntity entity) {
-        if (entity.getTenancyEntity() == null) {
-            return entity.getTenancyCode();
+    private String displayTenancyName(UserEntity entity) {
+        if (StringUtils.hasText(entity.getTenancyName())) {
+            return entity.getTenancyName();
         }
 
-        return entity.getTenancyEntity().getName();
+        return entity.getTenancyCode();
     }
 
     private LocalDate joinedAt(UserEntity entity) {

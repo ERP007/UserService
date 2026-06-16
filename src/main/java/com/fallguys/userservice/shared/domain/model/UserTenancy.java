@@ -7,7 +7,17 @@ public enum UserTenancy {
     ADMIN,
     HQ,
     BRANCH,
-    WAREHOUSE;
+    WAREHOUSE,
+    DEALER;
+
+    public static UserTenancy fromRole(UserRole role) {
+        return switch (role) {
+            case ADMIN -> ADMIN;
+            case HQ_STAFF, HQ_MANAGER -> HQ;
+            case BRANCH_STAFF, BRANCH_MANAGER -> DEALER;
+            case WAREHOUSE_STAFF, WAREHOUSE_MANAGER -> WAREHOUSE;
+        };
+    }
 
     public static Optional<UserTenancy> fromClaim(String value) {
         if (value == null || value.isBlank()) {
