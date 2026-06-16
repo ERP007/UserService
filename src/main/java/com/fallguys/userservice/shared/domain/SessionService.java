@@ -93,7 +93,7 @@ public class SessionService {
                 claims.tenancyName(),
                 claims.position(),
                 claims.role(),
-                claims.tenancy()
+                null
         );
         changed |= user.updateLastLogin(loginAt, loginSessionId);
         changed |= user.updatePasswordChangedAt(passwordChangedAt);
@@ -132,7 +132,7 @@ public class SessionService {
                 claims.tenancyName(),
                 claims.position(),
                 claims.role(),
-                claims.tenancy()
+                null
         );
         user.updateLastLogin(loginAt, loginSessionId);
         user.updatePasswordChangedAt(passwordChangedAt);

@@ -111,7 +111,7 @@ class UserManagementServiceTest {
         assertThat(user.getTenancyName()).isEqualTo("ADMIN");
         assertThat(user.getPosition()).isEqualTo("관리자");
         assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
-        assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
+        assertThat(user.getTenancy()).isNull();
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
         assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
@@ -1025,7 +1025,6 @@ class UserManagementServiceTest {
                 .claim("preferred_username", "admin001")
                 .claim("employee_no", employeeNo)
                 .claim("tenancy_code", tenancyCode)
-                .claim("tenancy_type", tenancyType)
                 .claim("user_role", userRole)
                 .claim("position", position)
                 .claim("email", "admin001@erp.com")

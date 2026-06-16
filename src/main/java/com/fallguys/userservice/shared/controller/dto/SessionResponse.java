@@ -16,7 +16,6 @@ public record SessionResponse(
         return new SessionResponse(new SessionContentResponse(
                 tenancyCode,
                 tenancyName,
-                jwt.getClaimAsString("tenancy_type"),
                 jwt.getClaimAsString("user_role"),
                 jwt.getClaimAsString("position"),
                 employeeNumber,

@@ -129,6 +129,7 @@ public class User {
             UserTenancy tenancy
     ) {
         String nextTenancyName = updatedTenancyName(tenancyName, tenancyCode);
+        UserTenancy nextTenancy = tenancy == null ? this.tenancy : tenancy;
         boolean changed = !Objects.equals(this.employeeNumber, employeeNumber)
                 || !Objects.equals(this.email, email)
                 || !Objects.equals(this.displayName, displayName)
@@ -136,7 +137,7 @@ public class User {
                 || !Objects.equals(this.tenancyName, nextTenancyName)
                 || !Objects.equals(this.position, position)
                 || this.role != role
-                || this.tenancy != tenancy
+                || this.tenancy != nextTenancy
                 || this.status != UserStatus.ACTIVE;
 
         this.employeeNumber = employeeNumber;
@@ -146,7 +147,7 @@ public class User {
         this.tenancyName = nextTenancyName;
         this.position = position;
         this.role = role;
-        this.tenancy = tenancy;
+        this.tenancy = nextTenancy;
         this.status = UserStatus.ACTIVE;
 
         return changed;
