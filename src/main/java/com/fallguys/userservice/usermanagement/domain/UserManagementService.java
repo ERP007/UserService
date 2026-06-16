@@ -1,18 +1,15 @@
 package com.fallguys.userservice.usermanagement.domain;
 
 import com.fallguys.userservice.shared.domain.JwtClaims;
-import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
-import com.fallguys.userservice.shared.domain.model.Tenancy;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
-import com.fallguys.userservice.shared.domain.model.UserTenancy;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.RequiredArgsConstructor;
@@ -31,14 +28,13 @@ public class UserManagementService {
     private static final int KEYCLOAK_SYNC_MAX_ATTEMPTS = 3;
 
     private final UserManagementRepository userRepository;
-    private final TenancyRepository tenancyRepository;
     private final UserIdentityManager userIdentityManager;
 
     /**
      * 관리자 전용 사용자 목록을 조회한다.
      *
      * 흐름:
-     * 1) JWT Claim의 tenancy_code, tenancy_type, user_role이 모두 ADMIN인지 확인한다.
+     * 1) JWT Claim의 tenancy_code와 user_role이 모두 ADMIN인지 확인한다.
      * 2) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
      * 3) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
      *
@@ -58,7 +54,7 @@ public class UserManagementService {
      * 관리자 전용 사용자 상세 정보를 조회한다.
      *
      * 흐름:
-     * 1) JWT Claim의 tenancy_code, tenancy_type, user_role이 모두 ADMIN인지 확인한다.
+     * 1) JWT Claim의 tenancy_code와 user_role이 모두 ADMIN인지 확인한다.
      * 2) keycloakId로 로컬 사용자와 소속 정보를 함께 조회한다.
      * 3) 상세 화면에 필요한 사용자 기본 정보와 로그인·비밀번호 변경 시각을 반환한다.
      *
@@ -81,7 +77,7 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) 로컬 사용자와 변경 대상 소속 코드를 검증하고, 소속 타입을 조회한다.
+     * 2) 로컬 사용자와 변경 대상 소속 정보를 확인한다.
      * 3) 로컬 사용자 프로필을 갱신해 저장한다.
      * 4) 트랜잭션 커밋 후 UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
      * 5) 상세 조회 응답을 반환한다.
@@ -91,7 +87,6 @@ public class UserManagementService {
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 수정 중단.
      * - 사용자 없음: UserException(404 매핑), 수정 중단.
-     * - 소속 코드 없음: UserException(400 매핑), 수정 중단.
      * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
@@ -100,15 +95,15 @@ public class UserManagementService {
 
         User user = userRepository.findByKeycloakId(command.keycloakId())
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
-        UserTenancy tenancy = resolveTenancy(command.tenancyCode());
 
         user.updateProfile(
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
-                tenancy
+                command.tenancy()
         );
         userRepository.save(user);
         UpdateUserIdentityCommand identityCommand = new UpdateUserIdentityCommand(
@@ -116,9 +111,10 @@ public class UserManagementService {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
-                tenancy
+                command.tenancy()
         );
         runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(identityCommand));
 
@@ -131,17 +127,15 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) tenancy_code가 가리키는 소속 타입과 요청 tenancy 값이 일치하는지 확인한다.
-     * 3) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
-     * 4) 이후 트랜잭션이 롤백되면 생성된 Keycloak 사용자를 삭제하도록 보상 훅을 등록한다.
-     * 5) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     * 2) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
+     * 3) 이후 트랜잭션이 롤백되면 생성된 Keycloak 사용자를 삭제하도록 보상 훅을 등록한다.
+     * 4) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
      *
      * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다.
      * 로컬 저장 실패 또는 커밋 롤백 시 생성된 Keycloak 사용자는 삭제를 시도한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 생성 중단.
-     * - 소속 코드 없음 또는 타입 불일치: UserException(400 매핑), 생성 중단.
      * - Keycloak 사용자 중복 또는 생성 실패: BusinessException 계열, 로컬 저장 전 중단.
      * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 사용자 삭제 시도. 삭제 실패는 suppressed로 보존한다.
      * - 커밋 시점 롤백: afterCompletion에서 Keycloak 사용자 삭제 시도. 삭제 실패는 로그로 남긴다.
@@ -149,7 +143,6 @@ public class UserManagementService {
     @Transactional
     public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
         JwtClaims.requireAdmin(jwt);
-        resolveAndValidateTenancy(command.tenancyCode(), command.tenancy());
 
         String initialPassword = issueInitialPassword(command);
         CreateUserIdentityCommand identityCommand = new CreateUserIdentityCommand(
@@ -157,6 +150,7 @@ public class UserManagementService {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
                 command.tenancy(),
@@ -172,6 +166,7 @@ public class UserManagementService {
                 identity.email(),
                 identity.displayName(),
                 identity.tenancyCode(),
+                identity.tenancyName(),
                 identity.position(),
                 identity.role(),
                 identity.tenancy()
@@ -273,23 +268,6 @@ public class UserManagementService {
         String generatedPassword = TemporaryPasswordGenerator.generate();
         TemporaryPasswordPolicy.validate(generatedPassword);
         return generatedPassword;
-    }
-
-    private UserTenancy resolveTenancy(String tenancyCode) {
-        Tenancy tenancy = tenancyRepository.findByCode(tenancyCode)
-                .orElseThrow(() -> new UserException(UserErrorCode.USER_TENANCY_NOT_FOUND));
-
-        return UserTenancy.fromClaim(tenancy.type().name())
-                .orElseThrow(() -> new UserException(UserErrorCode.USER_UNSUPPORTED_TENANCY));
-    }
-
-    private UserTenancy resolveAndValidateTenancy(String tenancyCode, UserTenancy requestedTenancy) {
-        UserTenancy resolvedTenancy = resolveTenancy(tenancyCode);
-        if (resolvedTenancy != requestedTenancy) {
-            throw new UserException(UserErrorCode.USER_TENANCY_MISMATCH);
-        }
-
-        return resolvedTenancy;
     }
 
     private void runAfterCommit(String operation, Runnable action) {

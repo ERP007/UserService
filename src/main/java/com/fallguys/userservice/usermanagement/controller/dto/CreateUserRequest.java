@@ -22,6 +22,9 @@ public record CreateUserRequest(
         @JsonProperty("tenancy_code")
         @JsonAlias("tenancyCode")
         String tenancyCode,
+        @JsonProperty("tenancy_name")
+        @JsonAlias("tenancyName")
+        String tenancyName,
         String position,
         String role,
         String tenancy,
@@ -40,6 +43,7 @@ public record CreateUserRequest(
                     email,
                     displayName,
                     tenancyCode,
+                    tenancyName,
                     position,
                     parseRole(role),
                     parseTenancy(tenancy),

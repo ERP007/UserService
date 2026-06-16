@@ -11,6 +11,7 @@ public record CreateUserCommand(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
         UserRole role,
         UserTenancy tenancy,
@@ -23,6 +24,7 @@ public record CreateUserCommand(
         email = required(email, "email");
         displayName = required(displayName, "displayName");
         tenancyCode = required(tenancyCode, "tenancyCode");
+        tenancyName = defaultToTenancyCode(tenancyName, tenancyCode);
         position = normalize(position);
         role = required(role, "role");
         tenancy = required(tenancy, "tenancy");
@@ -59,5 +61,10 @@ public record CreateUserCommand(
         }
 
         return value.trim();
+    }
+
+    private static String defaultToTenancyCode(String tenancyName, String tenancyCode) {
+        String normalized = normalize(tenancyName);
+        return normalized == null ? tenancyCode : normalized;
     }
 }

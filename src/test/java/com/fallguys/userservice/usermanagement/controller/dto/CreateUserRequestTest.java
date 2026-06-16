@@ -20,6 +20,7 @@ class CreateUserRequestTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "사원",
                 "BRANCH_STAFF",
                 "BRANCH",
@@ -31,6 +32,7 @@ class CreateUserRequestTest {
 
         assertThat(command.employeeNumber()).isEqualTo("branch001");
         assertThat(command.tenancyCode()).isEqualTo("WH-BR-001");
+        assertThat(command.tenancyName()).isEqualTo("강남 1지점");
         assertThat(command.role()).isEqualTo(UserRole.BRANCH_STAFF);
         assertThat(command.tenancy()).isEqualTo(UserTenancy.BRANCH);
         assertThat(command.passwordIssueMode()).isEqualTo(PasswordIssueMode.AUTO);
@@ -44,6 +46,7 @@ class CreateUserRequestTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "사원",
                 "BRANCH_STAFF",
                 "BRANCH",
@@ -64,6 +67,7 @@ class CreateUserRequestTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "사원",
                 "BRANCH_STAFF",
                 "BRANCH",
@@ -84,6 +88,7 @@ class CreateUserRequestTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "사원",
                 "BRANCH_STAFF",
                 "BRANCH",

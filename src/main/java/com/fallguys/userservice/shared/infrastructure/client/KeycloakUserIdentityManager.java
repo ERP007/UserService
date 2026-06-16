@@ -40,6 +40,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
 
     private static final String EMPLOYEE_NUMBER = "employee_no";
     private static final String TENANCY_CODE = "tenancy_code";
+    private static final String TENANCY_NAME = "tenancy_name";
     private static final String TENANCY_TYPE = "tenancy_type";
     private static final String USER_ROLE = "user_role";
     private static final String USER_PROFILE_NAME = "name";
@@ -273,6 +274,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         attributes.put(EMPLOYEE_NUMBER, List.of(command.employeeNumber()));
         attributes.put(USER_PROFILE_NAME, List.of(command.displayName()));
         attributes.put(TENANCY_CODE, List.of(command.tenancyCode()));
+        attributes.put(TENANCY_NAME, List.of(command.tenancyName()));
         attributes.put(TENANCY_TYPE, List.of(command.tenancy().name()));
         attributes.put(USER_ROLE, List.of(command.role().name()));
         attributes.put(USER_PROFILE_ROLE, List.of(command.role().name()));
@@ -292,6 +294,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
                 : new HashMap<>(representation.getAttributes());
         attributes.put(USER_PROFILE_NAME, List.of(command.displayName()));
         attributes.put(TENANCY_CODE, List.of(command.tenancyCode()));
+        attributes.put(TENANCY_NAME, List.of(command.tenancyName()));
         attributes.put(TENANCY_TYPE, List.of(command.tenancy().name()));
         attributes.put(USER_ROLE, List.of(command.role().name()));
         attributes.put(USER_PROFILE_ROLE, List.of(command.role().name()));
@@ -311,6 +314,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
                 command.tenancy(),
@@ -333,6 +337,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
                 representation.getEmail(),
                 firstText(attribute(representation, USER_PROFILE_NAME), displayName(representation), representation.getUsername()),
                 attribute(representation, TENANCY_CODE),
+                firstText(attribute(representation, TENANCY_NAME), attribute(representation, TENANCY_CODE)),
                 attribute(representation, POSITION),
                 role,
                 tenancy,
@@ -416,6 +421,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     private boolean isPersonalAttribute(String name) {
         return EMPLOYEE_NUMBER.equals(name)
                 || USER_PROFILE_NAME.equals(name)
+                || TENANCY_NAME.equals(name)
                 || POSITION.equals(name)
                 || "email".equalsIgnoreCase(name)
                 || "username".equalsIgnoreCase(name);
