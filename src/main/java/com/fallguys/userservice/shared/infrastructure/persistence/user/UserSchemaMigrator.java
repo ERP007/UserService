@@ -12,6 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class UserSchemaMigrator implements ApplicationRunner {
 
+    private static final int MIGRATION_LOCK_NAMESPACE = 907007;
+    private static final int MIGRATION_LOCK_KEY = 1;
+
     private final JdbcTemplate jdbcTemplate;
 
     public UserSchemaMigrator(JdbcTemplate jdbcTemplate) {
@@ -21,6 +24,7 @@ public class UserSchemaMigrator implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        lockMigration();
         migrateTenancyNameColumn();
         dropTenancyForeignKeyIfPresent();
         dropTenanciesTableIfPresent();
@@ -31,7 +35,7 @@ public class UserSchemaMigrator implements ApplicationRunner {
      *
      * 흐름:
      * 1) 기존 tenancies 테이블이 있으면 users.tenancy_code 기준으로 tenancies.name을 먼저 복사한다.
-     * 2) 복사할 이름이 없으면 기존 users.tenancy 값, 마지막으로 users.tenancy_code를 fallback으로 사용한다.
+     * 2) 복사할 이름이 없으면 users.tenancy_code를 fallback으로 사용한다.
      * 3) 더 이상 사용하지 않는 users.tenancy 컬럼과 check constraint를 제거한다.
      *
      * 트랜잭션: 애플리케이션 기동 시 스키마 보정용 쓰기 작업이다.
@@ -62,7 +66,7 @@ public class UserSchemaMigrator implements ApplicationRunner {
         if (columnExists("users", "tenancy")) {
             jdbcTemplate.execute("""
                     update users
-                       set tenancy_name = coalesce(nullif(btrim(tenancy_name), ''), tenancy, tenancy_code)
+                       set tenancy_name = coalesce(nullif(btrim(tenancy_name), ''), tenancy_code)
                     """);
             jdbcTemplate.execute("alter table users drop column tenancy");
         }
@@ -73,6 +77,11 @@ public class UserSchemaMigrator implements ApplicationRunner {
                  where tenancy_name is null or btrim(tenancy_name) = ''
                 """);
         jdbcTemplate.execute("alter table users alter column tenancy_name set not null");
+    }
+
+    private void lockMigration() {
+        jdbcTemplate.execute("select pg_advisory_xact_lock(%d, %d)"
+                .formatted(MIGRATION_LOCK_NAMESPACE, MIGRATION_LOCK_KEY));
     }
 
     private void dropTenancyForeignKeyIfPresent() {

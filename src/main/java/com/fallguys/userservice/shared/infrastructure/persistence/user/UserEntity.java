@@ -138,7 +138,7 @@ public class UserEntity {
                 tenancyName,
                 position,
                 role,
-                tenancy,
+                resolvedTenancy(),
                 status,
                 lastLoginAt,
                 lastLoginSessionId,
@@ -160,6 +160,17 @@ public class UserEntity {
         lastLoginSessionId = user.getLastLoginSessionId();
         passwordChangedAt = user.getPasswordChangedAt();
         return this;
+    }
+
+    private UserTenancy resolvedTenancy() {
+        if (tenancy != null) {
+            return tenancy;
+        }
+        if (role == null) {
+            return null;
+        }
+
+        return UserTenancy.fromRole(role);
     }
 
     @PrePersist

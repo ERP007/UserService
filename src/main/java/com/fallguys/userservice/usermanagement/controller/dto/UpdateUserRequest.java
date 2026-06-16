@@ -53,7 +53,11 @@ public record UpdateUserRequest(
             String value,
             UserRole role
     ) {
+        if (value == null || value.isBlank()) {
+            return UserTenancy.fromRole(role);
+        }
+
         return UserTenancy.fromClaim(value)
-                .orElseGet(() -> UserTenancy.fromRole(role));
+                .orElseThrow(() -> new UserException(UserErrorCode.USER_INVALID_REQUEST));
     }
 }
