@@ -9,6 +9,7 @@ public record UserResponse(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
         String role,
         String tenancy,
@@ -23,9 +24,10 @@ public record UserResponse(
                 user.getEmail(),
                 user.getDisplayName(),
                 user.getTenancyCode(),
+                user.getTenancyName(),
                 user.getPosition(),
                 user.getRole().name(),
-                user.getTenancy().name(),
+                user.getTenancy() == null ? null : user.getTenancy().name(),
                 user.getStatus().name()
         );
     }

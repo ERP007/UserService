@@ -16,7 +16,6 @@ import com.fallguys.userservice.shared.domain.InternalUserRepository;
 import com.fallguys.userservice.shared.domain.InternalUserService;
 import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
-import com.fallguys.userservice.shared.domain.TenancyRepository;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
@@ -24,8 +23,6 @@ import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
-import com.fallguys.userservice.shared.domain.model.Tenancy;
-import com.fallguys.userservice.shared.domain.model.TenancyType;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
@@ -65,9 +62,6 @@ class UserManagementServiceTest {
     private TestUserRepository userRepository;
 
     @Mock
-    private TenancyRepository tenancyRepository;
-
-    @Mock
     private UserIdentityManager userIdentityManager;
 
     private SessionService sessionService;
@@ -86,7 +80,7 @@ class UserManagementServiceTest {
     void setUp() {
         sessionService = new SessionService(userRepository, userIdentityManager);
         myPageService = new MyPageService(userRepository, userIdentityManager, sessionService);
-        userManagementService = new UserManagementService(userRepository, tenancyRepository, userIdentityManager);
+        userManagementService = new UserManagementService(userRepository, userIdentityManager);
         internalUserService = new InternalUserService(userRepository);
     }
 
@@ -114,9 +108,10 @@ class UserManagementServiceTest {
         assertThat(user.getEmail()).isEqualTo("admin001@erp.com");
         assertThat(user.getDisplayName()).isEqualTo("윤 영선");
         assertThat(user.getTenancyCode()).isEqualTo("ADMIN");
+        assertThat(user.getTenancyName()).isEqualTo("ADMIN");
         assertThat(user.getPosition()).isEqualTo("관리자");
         assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
-        assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
+        assertThat(user.getTenancy()).isNull();
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
         assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
@@ -132,6 +127,7 @@ class UserManagementServiceTest {
                 "old-admin@erp.com",
                 "Old Admin",
                 "HQ",
+                "본사",
                 "과장",
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
@@ -146,6 +142,7 @@ class UserManagementServiceTest {
         assertThat(user).isSameAs(existing);
         assertThat(user.getEmployeeNumber()).isEqualTo("admin001");
         assertThat(user.getTenancyCode()).isEqualTo("WH-HQ-001");
+        assertThat(user.getTenancyName()).isEqualTo("WH-HQ-001");
         assertThat(user.getPosition()).isEqualTo("부장");
         assertThat(user.getRole()).isEqualTo(UserRole.HQ_MANAGER);
         assertThat(user.getTenancy()).isEqualTo(UserTenancy.HQ);
@@ -163,6 +160,7 @@ class UserManagementServiceTest {
                 "admin001",
                 "admin001@erp.com",
                 "윤 영선",
+                "ADMIN",
                 "ADMIN",
                 "관리자",
                 UserRole.ADMIN,
@@ -191,6 +189,23 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void synchronizesSessionWithoutValidatingTenancyType() {
+        Jwt jwt = jwt("branch001", "BR-SE-001", "UNKNOWN", "BRANCH_MANAGER", "부장");
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = sessionService.synchronizeSession(jwt);
+
+        assertThat(user.getEmployeeNumber()).isEqualTo("branch001");
+        assertThat(user.getTenancyCode()).isEqualTo("BR-SE-001");
+        assertThat(user.getTenancyName()).isEqualTo("BR-SE-001");
+        assertThat(user.getRole()).isEqualTo(UserRole.BRANCH_MANAGER);
+        assertThat(user.getTenancy()).isNull();
+        verify(userRepository).save(any(User.class));
+    }
+
+    @Test
     void findsUsersWhenAccessTokenClaimsAreAdmin() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
@@ -216,15 +231,16 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void rejectsUserListAccessWhenTenancyTypeIsNotAdmin() {
+    void findsUsersWhenTenancyTypeIsMissingOrDifferent() {
         Jwt jwt = jwt("admin001", "ADMIN", "HQ", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
+        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
+        when(userRepository.findUsers(query)).thenReturn(expected);
 
-        assertUserError(
-                () -> userManagementService.findUsers(jwt, query),
-                UserErrorCode.USER_ADMIN_REQUIRED
-        );
-        verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
+        UserListPage actual = userManagementService.findUsers(jwt, query);
+
+        assertThat(actual).isSameAs(expected);
+        verify(userRepository).findUsers(query);
     }
 
     @Test
@@ -378,6 +394,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "점장",
                 UserRole.BRANCH_MANAGER,
                 UserTenancy.BRANCH
@@ -425,6 +442,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "점장",
                 UserRole.BRANCH_MANAGER,
                 UserTenancy.BRANCH
@@ -451,6 +469,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "WH-BR-001",
+                "강남 1지점",
                 "점장",
                 UserRole.BRANCH_MANAGER,
                 UserTenancy.BRANCH
@@ -487,8 +506,10 @@ class UserManagementServiceTest {
                 "updated@erp.com",
                 "수정 사용자",
                 "WH-BR-001",
+                "강남 1지점",
                 "MANAGER",
-                UserRole.BRANCH_MANAGER
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
         );
         User user = User.create(
                 targetKeycloakId,
@@ -496,6 +517,7 @@ class UserManagementServiceTest {
                 "old@erp.com",
                 "기존 사용자",
                 "HQ",
+                "본사",
                 "STAFF",
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
@@ -516,8 +538,6 @@ class UserManagementServiceTest {
                 LocalDateTime.parse("2023-04-12T10:30:00")
         );
         when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
-        when(tenancyRepository.findByCode("WH-BR-001"))
-                .thenReturn(Optional.of(new Tenancy("WH-BR-001", "강남 1지점", TenancyType.BRANCH)));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userRepository.findDetailByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(detail));
 
@@ -527,6 +547,7 @@ class UserManagementServiceTest {
         assertThat(user.getEmail()).isEqualTo("updated@erp.com");
         assertThat(user.getDisplayName()).isEqualTo("수정 사용자");
         assertThat(user.getTenancyCode()).isEqualTo("WH-BR-001");
+        assertThat(user.getTenancyName()).isEqualTo("강남 1지점");
         assertThat(user.getPosition()).isEqualTo("MANAGER");
         assertThat(user.getRole()).isEqualTo(UserRole.BRANCH_MANAGER);
         assertThat(user.getTenancy()).isEqualTo(UserTenancy.BRANCH);
@@ -535,6 +556,7 @@ class UserManagementServiceTest {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
                 UserTenancy.BRANCH
@@ -551,7 +573,6 @@ class UserManagementServiceTest {
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
         verify(userRepository, never()).findByKeycloakId(any(String.class));
-        verifyNoInteractions(tenancyRepository);
         verifyNoInteractions(userIdentityManager);
     }
 
@@ -565,33 +586,7 @@ class UserManagementServiceTest {
                 () -> userManagementService.updateUser(jwt, command),
                 UserErrorCode.USER_NOT_FOUND
         );
-        verifyNoInteractions(tenancyRepository);
         verifyNoInteractions(userIdentityManager);
-    }
-
-    @Test
-    void rejectsUpdateUserWhenTenancyCodeDoesNotExist() {
-        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        UpdateUserCommand command = updateUserCommand();
-        User user = User.create(
-                command.keycloakId(),
-                "HMC0001",
-                "old@erp.com",
-                "기존 사용자",
-                "HQ",
-                "STAFF",
-                UserRole.HQ_STAFF,
-                UserTenancy.HQ
-        );
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
-        when(tenancyRepository.findByCode(command.tenancyCode())).thenReturn(Optional.empty());
-
-        assertUserError(
-                () -> userManagementService.updateUser(jwt, command),
-                UserErrorCode.USER_TENANCY_NOT_FOUND
-        );
-        verifyNoInteractions(userIdentityManager);
-        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -604,14 +599,13 @@ class UserManagementServiceTest {
                 "old@erp.com",
                 "기존 사용자",
                 "HQ",
+                "본사",
                 "STAFF",
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
         );
         RuntimeException failure = new RuntimeException("database write failed");
         when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
-        when(tenancyRepository.findByCode(command.tenancyCode()))
-                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
         when(userRepository.save(user)).thenThrow(failure);
 
         assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
@@ -629,14 +623,13 @@ class UserManagementServiceTest {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
                 command.tenancy(),
                 true
         );
         when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
-        when(tenancyRepository.findByCode(command.tenancyCode()))
-                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CreateUserResult result = userManagementService.createUser(jwt, command);
@@ -647,6 +640,7 @@ class UserManagementServiceTest {
         assertThat(result.user().getEmail()).isEqualTo("branch001@erp.com");
         assertThat(result.user().getDisplayName()).isEqualTo("지점 담당자");
         assertThat(result.user().getTenancyCode()).isEqualTo("BR-001");
+        assertThat(result.user().getTenancyName()).isEqualTo("강남 1지점");
         assertThat(result.user().getRole()).isEqualTo(UserRole.BRANCH_STAFF);
         assertThat(result.user().getTenancy()).isEqualTo(UserTenancy.BRANCH);
         assertThat(result.user().getStatus()).isEqualTo(UserStatus.PENDING);
@@ -658,8 +652,6 @@ class UserManagementServiceTest {
     void createsUserWithAutoGeneratedTemporaryPassword() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         CreateUserCommand command = autoPasswordCreateUserCommand();
-        when(tenancyRepository.findByCode(command.tenancyCode()))
-                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
         when(userIdentityManager.create(any(CreateUserIdentityCommand.class)))
                 .thenAnswer(invocation -> {
                     CreateUserIdentityCommand issuedCommand = invocation.getArgument(0);
@@ -669,6 +661,7 @@ class UserManagementServiceTest {
                             issuedCommand.email(),
                             issuedCommand.displayName(),
                             issuedCommand.tenancyCode(),
+                            issuedCommand.tenancyName(),
                             issuedCommand.position(),
                             issuedCommand.role(),
                             issuedCommand.tenancy(),
@@ -703,13 +696,12 @@ class UserManagementServiceTest {
                 command.email(),
                 command.displayName(),
                 command.tenancyCode(),
+                command.tenancyName(),
                 command.position(),
                 command.role(),
                 command.tenancy(),
                 true
         );
-        when(tenancyRepository.findByCode(command.tenancyCode()))
-                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "강남 1지점", TenancyType.BRANCH)));
         when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -727,21 +719,6 @@ class UserManagementServiceTest {
         }
 
         verify(userIdentityManager).delete("created-keycloak-id");
-    }
-
-    @Test
-    void rejectsCreateUserWhenTenancyCodeAndTenancyTypeDoNotMatch() {
-        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        CreateUserCommand command = createUserCommand();
-        when(tenancyRepository.findByCode(command.tenancyCode()))
-                .thenReturn(Optional.of(new Tenancy(command.tenancyCode(), "본사 중앙창고", TenancyType.HQ)));
-
-        assertUserError(
-                () -> userManagementService.createUser(jwt, command),
-                UserErrorCode.USER_TENANCY_MISMATCH
-        );
-        verifyNoInteractions(userIdentityManager);
-        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -766,6 +743,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -823,6 +801,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -846,6 +825,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -872,6 +852,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -900,6 +881,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -940,6 +922,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
@@ -974,6 +957,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH,
@@ -988,6 +972,7 @@ class UserManagementServiceTest {
                 "branch001@erp.com",
                 "지점 담당자",
                 "BR-001",
+                "강남 1지점",
                 "사원",
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH,
@@ -1002,8 +987,10 @@ class UserManagementServiceTest {
                 "updated@erp.com",
                 "수정 사용자",
                 "WH-BR-001",
+                "강남 1지점",
                 "MANAGER",
-                UserRole.BRANCH_MANAGER
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
         );
     }
 
@@ -1038,7 +1025,6 @@ class UserManagementServiceTest {
                 .claim("preferred_username", "admin001")
                 .claim("employee_no", employeeNo)
                 .claim("tenancy_code", tenancyCode)
-                .claim("tenancy_type", tenancyType)
                 .claim("user_role", userRole)
                 .claim("position", position)
                 .claim("email", "admin001@erp.com")

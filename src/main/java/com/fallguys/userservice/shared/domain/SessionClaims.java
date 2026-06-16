@@ -1,7 +1,6 @@
 package com.fallguys.userservice.shared.domain;
 
 import com.fallguys.userservice.shared.domain.model.UserRole;
-import com.fallguys.userservice.shared.domain.model.UserTenancy;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -13,20 +12,21 @@ record SessionClaims(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
-        UserRole role,
-        UserTenancy tenancy
+        UserRole role
 ) {
 
-    static SessionClaims from(Jwt jwt, UserRole role, UserTenancy tenancy) {
+    static SessionClaims from(Jwt jwt, UserRole role) {
         String keycloakId = jwt.getSubject();
         String employeeNumber = requiredClaim(jwt, "employee_no");
         String email = jwt.getClaimAsString("email");
         String name = claimOrDefault(jwt, "name", employeeNumber);
         String tenancyCode = requiredClaim(jwt, "tenancy_code");
+        String tenancyName = jwt.getClaimAsString("tenancy_name");
         String position = jwt.getClaimAsString("position");
 
-        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, position, role, tenancy);
+        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, tenancyName, position, role);
     }
 
     private static String claimOrDefault(Jwt jwt, String claimName, String defaultValue) {

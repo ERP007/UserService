@@ -7,7 +7,6 @@ import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
-import com.fallguys.userservice.shared.infrastructure.persistence.tenancy.TenancyEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -16,13 +15,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.ForeignKey;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -61,22 +57,13 @@ public class UserEntity {
     @Column(name = "tenancy_code", nullable = false, length = 30)
     private String tenancyCode;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(
-            name = "tenancy_code",
-            referencedColumnName = "tenancy_code",
-            nullable = false,
-            insertable = false,
-            updatable = false,
-            foreignKey = @ForeignKey(name = "fk_users_tenancy")
-    )
-    private TenancyEntity tenancyEntity;
+    @Column(name = "tenancy_name", length = 100)
+    private String tenancyName;
 
     @Column(length = 50)
     private String position;
 
-    @Enumerated(EnumType.STRING)
-    @Column(length = 30)
+    @Transient
     private UserTenancy tenancy;
 
     @Enumerated(EnumType.STRING)
@@ -104,6 +91,7 @@ public class UserEntity {
             String email,
             String displayName,
             String tenancyCode,
+            String tenancyName,
             String position,
             UserRole role,
             UserTenancy tenancy
@@ -113,6 +101,7 @@ public class UserEntity {
         this.email = email;
         this.name = displayName;
         this.tenancyCode = tenancyCode;
+        this.tenancyName = tenancyName;
         this.position = position;
         this.role = role;
         this.tenancy = tenancy;
@@ -126,6 +115,7 @@ public class UserEntity {
                 user.getEmail(),
                 user.getDisplayName(),
                 user.getTenancyCode(),
+                user.getTenancyName(),
                 user.getPosition(),
                 user.getRole(),
                 user.getTenancy()
@@ -145,9 +135,10 @@ public class UserEntity {
                 email,
                 name,
                 tenancyCode,
+                tenancyName,
                 position,
                 role,
-                tenancy,
+                resolvedTenancy(),
                 status,
                 lastLoginAt,
                 lastLoginSessionId,
@@ -160,6 +151,7 @@ public class UserEntity {
         email = user.getEmail();
         name = user.getDisplayName();
         tenancyCode = user.getTenancyCode();
+        tenancyName = user.getTenancyName();
         position = user.getPosition();
         role = user.getRole();
         tenancy = user.getTenancy();
@@ -168,6 +160,17 @@ public class UserEntity {
         lastLoginSessionId = user.getLastLoginSessionId();
         passwordChangedAt = user.getPasswordChangedAt();
         return this;
+    }
+
+    private UserTenancy resolvedTenancy() {
+        if (tenancy != null) {
+            return tenancy;
+        }
+        if (role == null) {
+            return null;
+        }
+
+        return UserTenancy.fromRole(role);
     }
 
     @PrePersist

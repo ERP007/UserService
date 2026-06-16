@@ -10,6 +10,7 @@ public record UpdateUserIdentityCommand(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
         UserRole role,
         UserTenancy tenancy
@@ -20,6 +21,7 @@ public record UpdateUserIdentityCommand(
         email = required(email);
         displayName = required(displayName);
         tenancyCode = required(tenancyCode);
+        tenancyName = defaultToTenancyCode(tenancyName, tenancyCode);
         position = normalize(position);
         role = required(role);
         tenancy = required(tenancy);
@@ -48,5 +50,10 @@ public record UpdateUserIdentityCommand(
         }
 
         return value.trim();
+    }
+
+    private static String defaultToTenancyCode(String tenancyName, String tenancyCode) {
+        String normalized = normalize(tenancyName);
+        return normalized == null ? tenancyCode : normalized;
     }
 }

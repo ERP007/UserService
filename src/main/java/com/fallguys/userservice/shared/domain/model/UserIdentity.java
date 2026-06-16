@@ -6,6 +6,7 @@ public record UserIdentity(
         String email,
         String displayName,
         String tenancyCode,
+        String tenancyName,
         String position,
         UserRole role,
         UserTenancy tenancy,
