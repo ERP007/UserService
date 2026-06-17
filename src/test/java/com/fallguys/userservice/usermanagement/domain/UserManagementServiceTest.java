@@ -120,6 +120,20 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void storesTenancyCodeAndTenancyNameFromRelayedKeycloakAccessToken() {
+        Jwt jwt = jwtWithTenancyName("branch001", "BR-SE-001", "서울 1창고", "BRANCH_MANAGER", "부장");
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.empty());
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = sessionService.synchronizeSession(jwt);
+
+        assertThat(user.getTenancyCode()).isEqualTo("BR-SE-001");
+        assertThat(user.getTenancyName()).isEqualTo("서울 1창고");
+        verify(userRepository).save(any(User.class));
+    }
+
+    @Test
     void refreshesExistingUserClaimsWithoutCreatingNewUser() {
         User existing = User.create(
                 KEYCLOAK_ID,
@@ -1028,6 +1042,33 @@ class UserManagementServiceTest {
                 .claim("user_role", userRole)
                 .claim("position", position)
                 .claim("email", "admin001@erp.com")
+                .claim("name", "윤 영선")
+                .build();
+    }
+
+    private Jwt jwtWithTenancyName(
+            String employeeNo,
+            String tenancyCode,
+            String tenancyName,
+            String userRole,
+            String position
+    ) {
+        return Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject(KEYCLOAK_ID)
+                .issuedAt(Instant.parse("2026-06-03T00:05:00Z"))
+                .expiresAt(Instant.parse("2026-06-03T01:00:00Z"))
+                .claim("typ", "Bearer")
+                .claim("azp", "erp-client")
+                .claim("auth_time", LOGIN_AT.getEpochSecond())
+                .claim("sid", LOGIN_SESSION_ID)
+                .claim("preferred_username", employeeNo)
+                .claim("employee_no", employeeNo)
+                .claim("tenancy_code", tenancyCode)
+                .claim("tenancy_name", tenancyName)
+                .claim("user_role", userRole)
+                .claim("position", position)
+                .claim("email", employeeNo + "@erp.com")
                 .claim("name", "윤 영선")
                 .build();
     }
