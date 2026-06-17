@@ -14,5 +14,7 @@ public interface UserManagementRepository {
 
     UserListPage findUsers(UserSearchQuery query);
 
+    long countActiveAdminsForUpdate();
+
     User save(User user);
 }

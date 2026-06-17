@@ -9,6 +9,8 @@ import com.fallguys.userservice.mypage.domain.MyPageRepository;
 import com.fallguys.userservice.shared.domain.InternalUserRepository;
 import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.model.User;
+import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.BatchUser;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import com.fallguys.userservice.usermanagement.domain.UserListItem;
@@ -69,6 +71,11 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
     @Override
     public List<BatchUser> findBatchUsersByEmployeeNumbers(List<String> employeeNumbers) {
         return userJpaDao.findBatchUsersByEmployeeNumbers(employeeNumbers);
+    }
+
+    @Override
+    public long countActiveAdminsForUpdate() {
+        return userJpaDao.findByRoleAndStatusForUpdate(UserRole.ADMIN, UserStatus.ACTIVE).size();
     }
 
     @Override

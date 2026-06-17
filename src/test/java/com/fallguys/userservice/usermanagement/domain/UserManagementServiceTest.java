@@ -857,6 +857,65 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void rejectsSuspendingLastActiveAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "admin002",
+                "admin002@erp.com",
+                "관리자",
+                "ADMIN",
+                "관리자",
+                "관리자",
+                UserRole.ADMIN,
+                UserTenancy.ADMIN
+        );
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.countActiveAdminsForUpdate()).thenReturn(1L);
+
+        assertUserError(
+                () -> userManagementService.updateSuspension(jwt, targetKeycloakId, true),
+                UserErrorCode.USER_LAST_ADMIN_SUSPENSION_NOT_ALLOWED
+        );
+
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
+        verify(userRepository).countActiveAdminsForUpdate();
+        verify(userRepository, never()).save(any(User.class));
+        verify(userIdentityManager, never()).findState(any(String.class));
+        verify(userIdentityManager, never()).updateEnabled(any(String.class), anyBoolean());
+    }
+
+    @Test
+    void suspendsAdminWhenAnotherActiveAdminExists() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        User user = User.create(
+                targetKeycloakId,
+                "admin002",
+                "admin002@erp.com",
+                "관리자",
+                "ADMIN",
+                "관리자",
+                "관리자",
+                UserRole.ADMIN,
+                UserTenancy.ADMIN
+        );
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.countActiveAdminsForUpdate()).thenReturn(2L);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User result = userManagementService.updateSuspension(jwt, targetKeycloakId, true);
+
+        assertThat(result.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
+        verify(userRepository).countActiveAdminsForUpdate();
+        verify(userIdentityManager, never()).findState(any(String.class));
+        verify(userIdentityManager).updateEnabled(targetKeycloakId, false);
+        verify(userRepository).save(user);
+    }
+
+    @Test
     void activatesSuspendedUserWhenSuspendedRequestIsFalseAndPasswordUpdateIsNotRequired() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
