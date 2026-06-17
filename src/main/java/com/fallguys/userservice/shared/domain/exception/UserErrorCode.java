@@ -28,6 +28,7 @@ public enum UserErrorCode implements ErrorCode {
     USER_MYPAGE_PASSWORD_CHANGE_REQUIRED("USR-020", "비밀번호 변경 전까지 마이페이지에 접근할 수 없습니다."),
     USER_SUSPENDED("USR-021", "정지된 사용자는 서비스를 이용할 수 없습니다."),
     USER_TEMPORARY_PASSWORD_INVALID("USR-022", "임시 비밀번호는 영문과 숫자를 포함해 8자 이상이어야 합니다."),
+    USER_LAST_ADMIN_SUSPENSION_NOT_ALLOWED("USR-023", "마지막 관리자는 정지할 수 없습니다."),
     USER_IDENTITY_READ_FAILED("USR-101", "사용자 인증 정보를 조회하지 못했습니다."),
     USER_IDENTITY_CREATE_FAILED("USR-102", "사용자 인증 정보를 생성하지 못했습니다."),
     USER_IDENTITY_PASSWORD_RESET_FAILED("USR-103", "사용자 임시 비밀번호를 설정하지 못했습니다."),

@@ -10,6 +10,8 @@ import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
+import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.RequiredArgsConstructor;
@@ -219,25 +221,30 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) 로컬 사용자 row를 쓰기 잠금으로 조회해 같은 사용자에 대한 동시 상태 변경을 직렬화한다.
-     * 3) suspended 요청값으로 Keycloak enabled 목표값을 계산한다.
-     * 4) 정지 해제 요청이면 Keycloak required action을 조회해 PENDING/ACTIVE 복귀 상태를 결정한다(외부 조회).
-     * 5) 목표 상태를 로컬 사용자에 반영해 저장한다.
-     * 6) 트랜잭션 커밋 후 Keycloak enabled 값을 목표값으로 변경한다(외부 호출).
+     * 2) 정지 요청이면 ACTIVE ADMIN row들을 동일한 순서로 잠가 마지막 관리자 정지 race를 방지한다.
+     * 3) 로컬 사용자 row를 쓰기 잠금으로 조회해 같은 사용자에 대한 동시 상태 변경을 직렬화한다.
+     * 4) suspended 요청값으로 Keycloak enabled 목표값을 계산한다.
+     * 5) 정지 해제 요청이면 Keycloak required action을 조회해 PENDING/ACTIVE 복귀 상태를 결정한다(외부 조회).
+     * 6) 목표 상태를 로컬 사용자에 반영해 저장한다.
+     * 7) 트랜잭션 커밋 후 Keycloak enabled 값을 목표값으로 변경한다(외부 호출).
      *
      * 트랜잭션: 쓰기. 사용자 row 잠금은 커밋/롤백 시 해제되며, 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 상태 변경 중단.
      * - 로컬 사용자 없음: UserException(404 매핑), 상태 변경 중단.
+     * - 마지막 활성 관리자 정지 요청: UserException(400 매핑), 상태 변경 중단.
      * - Keycloak 상태 변경 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
      */
     @Transactional
     public User updateSuspension(Jwt jwt, String keycloakId, boolean suspended) {
         JwtClaims.requireAdmin(jwt);
 
+        long activeAdminCount = suspended ? userRepository.countActiveAdminsForUpdate() : Long.MAX_VALUE;
         User user = userRepository.findByKeycloakIdForUpdate(keycloakId)
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
+        rejectLastActiveAdminSuspension(user, suspended, activeAdminCount);
+
         boolean targetEnabled = !suspended;
         UserIdentityState targetState = suspensionTargetState(keycloakId, targetEnabled);
 
@@ -245,6 +252,16 @@ public class UserManagementService {
         User savedUser = userRepository.save(user);
         runAfterCommit("Keycloak enabled 상태 변경", () -> userIdentityManager.updateEnabled(keycloakId, targetState.enabled()));
         return savedUser;
+    }
+
+    private void rejectLastActiveAdminSuspension(User user, boolean suspended, long activeAdminCount) {
+        if (!suspended || user.getRole() != UserRole.ADMIN || user.getStatus() != UserStatus.ACTIVE) {
+            return;
+        }
+
+        if (activeAdminCount <= 1) {
+            throw new UserException(UserErrorCode.USER_LAST_ADMIN_SUSPENSION_NOT_ALLOWED);
+        }
     }
 
     private UserIdentityState suspensionTargetState(String keycloakId, boolean targetEnabled) {
