@@ -57,7 +57,7 @@ public class UserEntity {
     @Column(name = "tenancy_code", nullable = false, length = 30)
     private String tenancyCode;
 
-    @Column(name = "tenancy_name", length = 100)
+    @Column(name = "tenancy_name", nullable = false, length = 100)
     private String tenancyName;
 
     @Column(length = 50)

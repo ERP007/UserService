@@ -27,7 +27,7 @@ class UpdateUserRequestTest {
         UpdateUserCommand command = request.toCommand("keycloak-id");
 
         assertThat(command.role()).isEqualTo(UserRole.BRANCH_MANAGER);
-        assertThat(command.tenancy()).isEqualTo(UserTenancy.DEALER);
+        assertThat(command.tenancy()).isEqualTo(UserTenancy.BRANCH);
     }
 
     @Test
