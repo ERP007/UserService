@@ -3,6 +3,8 @@ package com.fallguys.userservice.shared.infrastructure.persistence.user;
 import java.util.List;
 import java.util.Optional;
 
+import com.fallguys.userservice.shared.domain.model.UserRole;
+import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.BatchUser;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
@@ -27,6 +29,13 @@ public interface UserJpaDao extends JpaRepository<UserEntity, Long>, JpaSpecific
 
     @Override
     Page<UserEntity> findAll(Specification<UserEntity> specification, Pageable pageable);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from UserEntity u where u.role = :role and u.status = :status order by u.id")
+    List<UserEntity> findByRoleAndStatusForUpdate(
+            @Param("role") UserRole role,
+            @Param("status") UserStatus status
+    );
 
     @Query("""
             select new com.fallguys.userservice.shared.domain.query.BatchUser(
