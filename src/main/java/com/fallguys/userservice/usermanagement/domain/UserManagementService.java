@@ -5,15 +5,20 @@ import com.fallguys.userservice.shared.domain.UserIdentityManager;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
+import com.fallguys.userservice.shared.domain.exception.UserAlreadyExistsException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
+import com.fallguys.userservice.shared.domain.exception.UserIdentityException;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
 import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -37,18 +42,21 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim의 tenancy_code와 user_role이 모두 ADMIN인지 확인한다.
-     * 2) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
-     * 3) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
+     * 2) Keycloak 전체 ERP 사용자 정보를 조회해 로컬 사용자 DB에 upsert한다.
+     * 3) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
+     * 4) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
      *
-     * 트랜잭션: 읽기 전용. 사용자 목록과 페이지 메타데이터만 조회하며 상태를 변경하지 않는다.
+     * 트랜잭션: 쓰기. Keycloak 조회 성공 후 로컬 사용자 정보와 상태를 최신 인증 정보 기준으로 반영한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 조회 중단.
      * - 필수 권한 Claim 누락 또는 미지원 값: UserException(403 매핑), 조회 중단.
+     * - Keycloak 전체 사용자 조회 실패: UserIdentityException(502 매핑), 로컬 동기화 및 목록 조회 중단.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public UserListPage findUsers(Jwt jwt, UserSearchQuery query) {
         JwtClaims.requireAdmin(jwt);
+        synchronizeUsersFromKeycloak();
         return userRepository.findUsers(query);
     }
 
@@ -80,16 +88,19 @@ public class UserManagementService {
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
      * 2) 로컬 사용자와 변경 대상 소속 정보를 확인한다.
-     * 3) 로컬 사용자 프로필을 갱신해 저장한다.
-     * 4) 트랜잭션 커밋 후 UserIdentityManager로 Keycloak 사용자 claim 원본을 수정한다(외부 호출).
-     * 5) 상세 조회 응답을 반환한다.
+     * 3) Keycloak 사용자 현재 프로필을 보상 복구용으로 조회한다.
+     * 4) Keycloak 사용자 프로필을 먼저 수정한다(외부 호출).
+     * 5) 로컬 사용자 프로필을 갱신해 저장한다.
+     * 6) 상세 조회 응답을 반환한다.
      *
-     * 트랜잭션: 쓰기. 로컬 저장 커밋이 성공한 뒤 Keycloak을 동기화한다.
+     * 트랜잭션: 쓰기. Keycloak 수정 실패 시 로컬 DB는 변경하지 않는다.
+     * 로컬 저장 실패 또는 커밋 롤백 시 Keycloak 프로필은 수정 전 값으로 복구를 시도한다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 수정 중단.
      * - 사용자 없음: UserException(404 매핑), 수정 중단.
-     * - Keycloak 수정 실패: BusinessException 계열, 로컬 저장 커밋 후 실패 로그 및 예외 전파.
+     * - Keycloak 조회/수정 실패: UserIdentityException, 로컬 DB 변경 전 중단.
+     * - 로컬 저장 실패: RuntimeException, 트랜잭션 롤백 및 Keycloak 프로필 복구 시도.
      */
     @Transactional
     public UserDetail updateUser(Jwt jwt, UpdateUserCommand command) {
@@ -97,17 +108,7 @@ public class UserManagementService {
 
         User user = userRepository.findByKeycloakId(command.keycloakId())
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
-
-        user.updateProfile(
-                command.email(),
-                command.displayName(),
-                command.tenancyCode(),
-                command.tenancyName(),
-                command.position(),
-                command.role(),
-                command.tenancy()
-        );
-        userRepository.save(user);
+        UpdateUserIdentityCommand previousIdentityCommand = previousIdentityCommand(command.keycloakId());
         UpdateUserIdentityCommand identityCommand = new UpdateUserIdentityCommand(
                 command.keycloakId(),
                 command.email(),
@@ -118,10 +119,28 @@ public class UserManagementService {
                 command.role(),
                 command.tenancy()
         );
-        runAfterCommit("Keycloak 사용자 정보 수정", () -> userIdentityManager.update(identityCommand));
+        userIdentityManager.update(identityCommand);
+        AtomicBoolean identityRestored = new AtomicBoolean(false);
+        registerIdentityRestoreRollbackCleanup(previousIdentityCommand, identityRestored);
 
-        return userRepository.findDetailByKeycloakId(command.keycloakId())
-                .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
+        try {
+            user.updateProfile(
+                    command.email(),
+                    command.displayName(),
+                    command.tenancyCode(),
+                    command.tenancyName(),
+                    command.position(),
+                    command.role(),
+                    command.tenancy()
+            );
+            userRepository.save(user);
+
+            return userRepository.findDetailByKeycloakId(command.keycloakId())
+                    .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
+        } catch (RuntimeException ex) {
+            restoreUpdatedIdentity(previousIdentityCommand, identityRestored, ex);
+            throw ex;
+        }
     }
 
     /**
@@ -129,9 +148,10 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim이 관리자 권한인지 확인한다.
-     * 2) UserIdentityManager로 Keycloak 사용자를 생성하고 Representation 기반 값을 돌려받는다(외부 호출).
-     * 3) 이후 트랜잭션이 롤백되면 생성된 Keycloak 사용자를 삭제하도록 보상 훅을 등록한다.
-     * 4) 생성된 Keycloak ID를 로컬 사용자와 매핑해 저장한다.
+     * 2) 서버에서 임시 비밀번호를 생성한다.
+     * 3) UserIdentityManager로 Keycloak 사용자를 생성하고 실제 Keycloak ID를 돌려받는다(외부 호출).
+     * 4) 이후 트랜잭션이 롤백되면 생성된 Keycloak 사용자를 삭제하도록 보상 훅을 등록한다.
+     * 5) 생성된 Keycloak ID를 로컬 사용자와 매핑해 PENDING 상태로 저장한다.
      *
      * 트랜잭션: 쓰기. Keycloak 생성 실패 시 로컬 저장은 수행하지 않는다.
      * 로컬 저장 실패 또는 커밋 롤백 시 생성된 Keycloak 사용자는 삭제를 시도한다.
@@ -145,9 +165,11 @@ public class UserManagementService {
     @Transactional
     public CreateUserResult createUser(Jwt jwt, CreateUserCommand command) {
         JwtClaims.requireAdmin(jwt);
+        rejectDuplicateEmployeeNumber(command.employeeNumber());
 
         String initialPassword = issueInitialPassword(command);
         CreateUserIdentityCommand identityCommand = new CreateUserIdentityCommand(
+                null,
                 command.employeeNumber(),
                 command.email(),
                 command.displayName(),
@@ -158,7 +180,6 @@ public class UserManagementService {
                 command.tenancy(),
                 initialPassword
         );
-
         UserIdentity identity = userIdentityManager.create(identityCommand);
         AtomicBoolean identityDeleted = new AtomicBoolean(false);
         registerIdentityRollbackCleanup(identity.keycloakId(), identityDeleted);
@@ -273,6 +294,35 @@ public class UserManagementService {
         return new UserIdentityState(true, currentState.passwordUpdateRequired());
     }
 
+    private void synchronizeUsersFromKeycloak() {
+        List<UserIdentity> identities = userIdentityManager.findAll();
+        identities.forEach(this::synchronizeUserFromIdentity);
+        deleteUsersMissingFromKeycloak(identities);
+    }
+
+    private void synchronizeUserFromIdentity(UserIdentity identity) {
+        User user = userRepository.findByKeycloakId(identity.keycloakId())
+                .or(() -> userRepository.findByEmployeeNumber(identity.employeeNumber()))
+                .orElseGet(() -> User.createFromIdentity(identity));
+        user.syncIdentityProfile(identity);
+        userRepository.save(user);
+    }
+
+    private void deleteUsersMissingFromKeycloak(List<UserIdentity> identities) {
+        Set<String> keycloakIds = identities.stream()
+                .map(UserIdentity::keycloakId)
+                .filter(this::hasText)
+                .collect(Collectors.toSet());
+
+        userRepository.findAll().stream()
+                .filter(user -> missingFromKeycloak(user, keycloakIds))
+                .forEach(userRepository::delete);
+    }
+
+    private boolean missingFromKeycloak(User user, Set<String> keycloakIds) {
+        return !hasText(user.getKeycloakId()) || !keycloakIds.contains(user.getKeycloakId());
+    }
+
     private String issueInitialPassword(CreateUserCommand command) {
         if (command.passwordIssueMode() == PasswordIssueMode.AUTO) {
             return issueTemporaryPassword();
@@ -316,6 +366,24 @@ public class UserManagementService {
         });
     }
 
+    private void registerIdentityRestoreRollbackCleanup(
+            UpdateUserIdentityCommand previousIdentityCommand,
+            AtomicBoolean identityRestored
+    ) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    restoreUpdatedIdentity(previousIdentityCommand, identityRestored, null);
+                }
+            }
+        });
+    }
+
     private void deleteCreatedIdentity(String keycloakId, AtomicBoolean identityDeleted, RuntimeException sourceFailure) {
         if (!identityDeleted.compareAndSet(false, true)) {
             return;
@@ -331,6 +399,59 @@ public class UserManagementService {
 
             log.warn("Keycloak 생성 사용자 롤백 보상 삭제 실패. keycloakId={}", keycloakId, deleteEx);
         }
+    }
+
+    private void restoreUpdatedIdentity(
+            UpdateUserIdentityCommand previousIdentityCommand,
+            AtomicBoolean identityRestored,
+            RuntimeException sourceFailure
+    ) {
+        if (!identityRestored.compareAndSet(false, true)) {
+            return;
+        }
+
+        try {
+            userIdentityManager.update(previousIdentityCommand);
+        } catch (RuntimeException restoreEx) {
+            if (sourceFailure != null) {
+                sourceFailure.addSuppressed(restoreEx);
+                return;
+            }
+
+            log.warn("Keycloak 사용자 정보 롤백 보상 복구 실패. keycloakId={}",
+                    previousIdentityCommand.keycloakId(),
+                    restoreEx);
+        }
+    }
+
+    private UpdateUserIdentityCommand previousIdentityCommand(String keycloakId) {
+        return userIdentityManager.findById(keycloakId)
+                .map(this::toUpdateIdentityCommand)
+                .orElseThrow(() -> new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED));
+    }
+
+    private UpdateUserIdentityCommand toUpdateIdentityCommand(UserIdentity identity) {
+        return new UpdateUserIdentityCommand(
+                identity.keycloakId(),
+                identity.email(),
+                identity.displayName(),
+                identity.tenancyCode(),
+                identity.tenancyName(),
+                identity.position(),
+                identity.role(),
+                identity.tenancy()
+        );
+    }
+
+    private void rejectDuplicateEmployeeNumber(String employeeNumber) {
+        if (userRepository.existsByEmployeeNumber(employeeNumber)
+                || userIdentityManager.existsByEmployeeNumber(employeeNumber)) {
+            throw new UserAlreadyExistsException();
+        }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void runWithRetry(String operation, Runnable action) {

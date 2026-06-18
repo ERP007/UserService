@@ -6,6 +6,7 @@ import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserTenancy;
 
 public record CreateUserIdentityCommand(
+        String keycloakId,
         String employeeNumber,
         String email,
         String displayName,
@@ -18,6 +19,7 @@ public record CreateUserIdentityCommand(
 ) {
 
     public CreateUserIdentityCommand {
+        keycloakId = normalize(keycloakId);
         employeeNumber = required(employeeNumber, "employeeNumber");
         email = required(email, "email");
         displayName = required(displayName, "displayName");

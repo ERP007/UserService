@@ -50,6 +50,7 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
     private static final int ERROR_SUMMARY_MAX_LENGTH = 200;
     private static final int ERROR_SUMMARY_PREFIX_LENGTH = 40;
     private static final int ERROR_SUMMARY_SUFFIX_LENGTH = 20;
+    private static final int USER_LIST_PAGE_SIZE = 100;
     private static final String MASK = "***";
 
     private final Keycloak keycloak;
@@ -57,11 +58,78 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
 
     @Override
     public Optional<UserIdentity> findById(String keycloakId) {
+        if (!StringUtils.hasText(keycloakId)) {
+            return Optional.empty();
+        }
+
         try {
             UserRepresentation representation = user(keycloakId).toRepresentation();
             return Optional.of(toIdentity(representation));
         } catch (NotFoundException ex) {
             return Optional.empty();
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        }
+    }
+
+    @Override
+    public Optional<UserIdentity> findByEmployeeNumber(String employeeNumber) {
+        if (!StringUtils.hasText(employeeNumber)) {
+            return Optional.empty();
+        }
+
+        try {
+            return searchByEmployeeNumber(employeeNumber).stream()
+                    .findFirst()
+                    .flatMap(this::toManagedIdentity);
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        }
+    }
+
+    @Override
+    public boolean existsByEmployeeNumber(String employeeNumber) {
+        if (!StringUtils.hasText(employeeNumber)) {
+            return false;
+        }
+
+        String normalizedEmployeeNumber = employeeNumber.trim();
+        try {
+            return searchByEmployeeNumber(normalizedEmployeeNumber).stream()
+                    .anyMatch(representation -> hasEmployeeNumber(representation, normalizedEmployeeNumber));
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
+        }
+    }
+
+    @Override
+    public List<UserIdentity> findAll() {
+        try {
+            List<UserIdentity> identities = new ArrayList<>();
+            int firstResult = 0;
+
+            while (true) {
+                List<UserRepresentation> page = users().search(
+                        null,
+                        null,
+                        null,
+                        null,
+                        firstResult,
+                        USER_LIST_PAGE_SIZE,
+                        null,
+                        false
+                );
+                page.stream()
+                        .map(this::toManagedIdentity)
+                        .flatMap(Optional::stream)
+                        .forEach(identities::add);
+
+                if (page.size() < USER_LIST_PAGE_SIZE) {
+                    return identities;
+                }
+
+                firstResult += page.size();
+            }
         } catch (ProcessingException | WebApplicationException ex) {
             throw new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED, ex);
         }
@@ -243,6 +311,20 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         return representation;
     }
 
+    private List<UserRepresentation> searchByEmployeeNumber(String employeeNumber) {
+        return users().search(
+                employeeNumber.trim(),
+                null,
+                null,
+                null,
+                0,
+                10,
+                null,
+                false,
+                true
+        );
+    }
+
     private CredentialRepresentation passwordCredential(CreateUserIdentityCommand command) {
         return passwordCredential(command.initialPassword());
     }
@@ -318,31 +400,56 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
                 command.position(),
                 command.role(),
                 command.tenancy(),
+                true,
                 true
         );
     }
 
     private UserIdentity toIdentity(UserRepresentation representation) {
+        return toManagedIdentity(representation)
+                .orElseThrow(() -> new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED));
+    }
+
+    private Optional<UserIdentity> toManagedIdentity(UserRepresentation representation) {
         UserRole role = UserRole.fromClaim(firstText(
                         attribute(representation, USER_ROLE),
                         attribute(representation, USER_PROFILE_ROLE)
                 ))
-                .orElseThrow(() -> new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED));
-        UserTenancy tenancy = UserTenancy.fromClaim(attribute(representation, TENANCY_TYPE))
-                .orElseThrow(() -> new UserIdentityException(UserErrorCode.USER_IDENTITY_READ_FAILED));
+                .orElse(null);
+        String keycloakId = representation.getId();
+        String employeeNumber = firstText(attribute(representation, EMPLOYEE_NUMBER), representation.getUsername());
+        String tenancyCode = attribute(representation, TENANCY_CODE);
 
-        return new UserIdentity(
-                representation.getId(),
-                firstText(attribute(representation, EMPLOYEE_NUMBER), representation.getUsername()),
+        if (!StringUtils.hasText(keycloakId)
+                || !StringUtils.hasText(employeeNumber)
+                || !StringUtils.hasText(tenancyCode)
+                || role == null) {
+            log.debug("Keycloak 사용자 동기화 제외. keycloakId={}, username={}", keycloakId, representation.getUsername());
+            return Optional.empty();
+        }
+
+        UserTenancy tenancy = UserTenancy.fromClaim(attribute(representation, TENANCY_TYPE))
+                .orElseGet(() -> UserTenancy.fromRole(role));
+
+        return Optional.of(new UserIdentity(
+                keycloakId,
+                employeeNumber,
                 representation.getEmail(),
-                firstText(attribute(representation, USER_PROFILE_NAME), displayName(representation), representation.getUsername()),
-                attribute(representation, TENANCY_CODE),
-                firstText(attribute(representation, TENANCY_NAME), attribute(representation, TENANCY_CODE)),
+                firstText(attribute(representation, USER_PROFILE_NAME), displayName(representation), employeeNumber),
+                tenancyCode,
+                firstText(attribute(representation, TENANCY_NAME), tenancyCode),
                 attribute(representation, POSITION),
                 role,
                 tenancy,
-                Boolean.TRUE.equals(representation.isEnabled())
-        );
+                Boolean.TRUE.equals(representation.isEnabled()),
+                passwordUpdateRequired(representation)
+        ));
+    }
+
+    private boolean hasEmployeeNumber(UserRepresentation representation, String employeeNumber) {
+        String identityEmployeeNumber = firstText(attribute(representation, EMPLOYEE_NUMBER), representation.getUsername());
+        return StringUtils.hasText(identityEmployeeNumber)
+                && identityEmployeeNumber.trim().equalsIgnoreCase(employeeNumber);
     }
 
     private String displayName(UserRepresentation representation) {
