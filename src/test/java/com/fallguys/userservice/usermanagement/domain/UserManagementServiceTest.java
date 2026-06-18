@@ -332,6 +332,33 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void doesNotDeletePendingUserWithoutKeycloakIdWhenSynchronizingKeycloakUsers() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserSearchQuery query = userSearchQuery();
+        User pendingUser = User.createPending(
+                null,
+                "pending001",
+                "pending@erp.com",
+                "대기 사용자",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
+        when(userIdentityManager.findAll()).thenReturn(List.of());
+        when(userRepository.findAll()).thenReturn(List.of(pendingUser));
+        when(userRepository.findUsers(query)).thenReturn(expected);
+
+        UserListPage actual = userManagementService.findUsers(jwt, query);
+
+        assertThat(actual).isSameAs(expected);
+        verify(userRepository, never()).delete(pendingUser);
+        verify(userRepository).findUsers(query);
+    }
+
+    @Test
     void deletesDuplicateLocalUserWhenEmployeeNumberMatchesButKeycloakIdDoesNotMatch() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
@@ -709,7 +736,7 @@ class UserManagementServiceTest {
                 PASSWORD_CHANGED_AT,
                 LocalDateTime.parse("2023-04-12T10:30:00")
         );
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userIdentityManager.findById(targetKeycloakId)).thenReturn(Optional.of(new UserIdentity(
                 targetKeycloakId,
                 "HMC0001",
@@ -757,7 +784,7 @@ class UserManagementServiceTest {
                 () -> userManagementService.updateUser(jwt, updateUserCommand()),
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
-        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verify(userRepository, never()).findByKeycloakIdForUpdate(any(String.class));
         verifyNoInteractions(userIdentityManager);
     }
 
@@ -765,7 +792,7 @@ class UserManagementServiceTest {
     void rejectsUpdateUserWhenUserDoesNotExist() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UpdateUserCommand command = updateUserCommand();
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.empty());
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.empty());
 
         assertUserError(
                 () -> userManagementService.updateUser(jwt, command),
@@ -790,7 +817,7 @@ class UserManagementServiceTest {
                 UserTenancy.HQ
         );
         RuntimeException failure = new RuntimeException("database write failed");
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
         when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
                 command.keycloakId(),
                 "HMC0001",
@@ -830,7 +857,7 @@ class UserManagementServiceTest {
                 UserTenancy.HQ
         );
         RuntimeException failure = new RuntimeException("keycloak update failed");
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
         when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
                 command.keycloakId(),
                 "HMC0001",
@@ -881,7 +908,7 @@ class UserManagementServiceTest {
                 PASSWORD_CHANGED_AT,
                 LocalDateTime.parse("2023-04-12T10:30:00")
         );
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
         when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
                 command.keycloakId(),
                 "HMC0001",
@@ -1050,7 +1077,7 @@ class UserManagementServiceTest {
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
         );
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ResetPasswordResult result = userManagementService.resetPassword(jwt, targetKeycloakId);
@@ -1077,13 +1104,13 @@ class UserManagementServiceTest {
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
         verifyNoInteractions(userIdentityManager);
-        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verify(userRepository, never()).findByKeycloakIdForUpdate(any(String.class));
     }
 
     @Test
     void rejectsResetPasswordWhenUserDoesNotExist() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        when(userRepository.findByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
+        when(userRepository.findByKeycloakIdForUpdate("missing-keycloak-id")).thenReturn(Optional.empty());
 
         assertUserError(
                 () -> userManagementService.resetPassword(jwt, "missing-keycloak-id"),
@@ -1109,7 +1136,7 @@ class UserManagementServiceTest {
                 UserTenancy.BRANCH
         );
         RuntimeException failure = new RuntimeException("database write failed");
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenThrow(failure);
 
         assertThatThrownBy(() -> userManagementService.resetPassword(jwt, targetKeycloakId))
