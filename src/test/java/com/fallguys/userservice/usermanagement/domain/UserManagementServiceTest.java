@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -21,6 +23,7 @@ import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
+import com.fallguys.userservice.shared.domain.exception.UserAlreadyExistsException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
 import com.fallguys.userservice.shared.domain.model.User;
@@ -229,7 +232,264 @@ class UserManagementServiceTest {
         UserListPage actual = userManagementService.findUsers(jwt, query);
 
         assertThat(actual).isSameAs(expected);
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository).findUsers(query);
+    }
+
+    @Test
+    void synchronizesKeycloakUsersWhenAdminRequestsExplicitSync() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        User existing = User.create(
+                "target-keycloak-id",
+                "old-employee",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserIdentity identity = new UserIdentity(
+                "target-keycloak-id",
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "강남 1지점",
+                "부장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH,
+                true,
+                true
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(existing));
+        when(userRepository.save(existing)).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        assertThat(existing.getEmployeeNumber()).isEqualTo("branch001");
+        assertThat(existing.getEmail()).isEqualTo("branch001@erp.com");
+        assertThat(existing.getDisplayName()).isEqualTo("지점 담당자");
+        assertThat(existing.getTenancyCode()).isEqualTo("BR-001");
+        assertThat(existing.getTenancyName()).isEqualTo("강남 1지점");
+        assertThat(existing.getPosition()).isEqualTo("부장");
+        assertThat(existing.getRole()).isEqualTo(UserRole.BRANCH_MANAGER);
+        assertThat(existing.getTenancy()).isEqualTo(UserTenancy.BRANCH);
+        assertThat(existing.getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(userIdentityManager).findAll();
+        verify(userRepository).save(existing);
+    }
+
+    @Test
+    void deletesLocalUsersMissingFromKeycloakWhenAdminRequestsExplicitSync() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "강남 1지점",
+                "부장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH,
+                true,
+                false
+        );
+        User staleUser = User.create(
+                "stale-keycloak-id",
+                "stale001",
+                "stale@erp.com",
+                "삭제 대상",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.empty());
+        when(userRepository.findByEmployeeNumber(identity.employeeNumber())).thenReturn(Optional.empty());
+        when(userRepository.findAll()).thenReturn(List.of(staleUser));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository).save(any(User.class));
+        verify(userRepository).delete(staleUser);
+    }
+
+    @Test
+    void skipsDeletingLocalUsersWhenKeycloakReturnsEmptyResult() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        when(userIdentityManager.findAll()).thenReturn(List.of());
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository, never()).findAll();
+        verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    void skipsDeletingLocalUsersWhenKeycloakResultIsSignificantlySmallerThanLocalUsers() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ,
+                false,
+                false
+        );
+        User liveUser = User.create(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ
+        );
+        User staleUser = User.create(
+                "stale-keycloak-id",
+                "stale001",
+                "stale@erp.com",
+                "삭제 대상",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        User anotherStaleUser = User.create(
+                "another-stale-keycloak-id",
+                "stale002",
+                "stale2@erp.com",
+                "삭제 대상2",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(liveUser));
+        when(userRepository.save(liveUser)).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findAll()).thenReturn(List.of(liveUser, staleUser, anotherStaleUser));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository).save(liveUser);
+        verify(userRepository, never()).delete(staleUser);
+        verify(userRepository, never()).delete(anotherStaleUser);
+    }
+
+    @Test
+    void doesNotDeletePendingUserWithoutKeycloakIdWhenAdminRequestsExplicitSync() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "강남 1지점",
+                "부장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH,
+                true,
+                false
+        );
+        User pendingUser = User.createPending(
+                null,
+                "pending001",
+                "pending@erp.com",
+                "대기 사용자",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.empty());
+        when(userRepository.findByEmployeeNumber(identity.employeeNumber())).thenReturn(Optional.empty());
+        when(userRepository.findAll()).thenReturn(List.of(pendingUser));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository).save(any(User.class));
+        verify(userRepository, never()).delete(pendingUser);
+    }
+
+    @Test
+    void deletesDuplicateLocalUserWhenEmployeeNumberMatchesButKeycloakIdDoesNotMatchOnExplicitSync() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ,
+                false,
+                false
+        );
+        User liveUser = User.create(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ
+        );
+        User staleDuplicate = User.create(
+                "stale-keycloak-id",
+                "TEST001",
+                "test@test.com",
+                "TEsT",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(liveUser));
+        when(userRepository.save(liveUser)).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findAll()).thenReturn(List.of(liveUser, staleDuplicate));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository).save(liveUser);
+        verify(userRepository, never()).delete(liveUser);
+        verify(userRepository).delete(staleDuplicate);
+    }
+
+    @Test
+    void rejectsKeycloakSyncWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "HQ_MANAGER", "부장");
+
+        assertUserError(
+                () -> userManagementService.synchronizeUsersFromKeycloak(jwt),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
+        verify(userIdentityManager, never()).findAll();
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -241,6 +501,7 @@ class UserManagementServiceTest {
                 () -> userManagementService.findUsers(jwt, query),
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
     }
 
@@ -254,6 +515,7 @@ class UserManagementServiceTest {
         UserListPage actual = userManagementService.findUsers(jwt, query);
 
         assertThat(actual).isSameAs(expected);
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository).findUsers(query);
     }
 
@@ -266,6 +528,7 @@ class UserManagementServiceTest {
                 () -> userManagementService.findUsers(jwt, query),
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository, never()).findUsers(any(UserSearchQuery.class));
     }
 
@@ -551,7 +814,20 @@ class UserManagementServiceTest {
                 PASSWORD_CHANGED_AT,
                 LocalDateTime.parse("2023-04-12T10:30:00")
         );
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(targetKeycloakId)).thenReturn(Optional.of(new UserIdentity(
+                targetKeycloakId,
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userRepository.findDetailByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(detail));
 
@@ -586,7 +862,7 @@ class UserManagementServiceTest {
                 () -> userManagementService.updateUser(jwt, updateUserCommand()),
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
-        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verify(userRepository, never()).findByKeycloakIdForUpdate(any(String.class));
         verifyNoInteractions(userIdentityManager);
     }
 
@@ -594,7 +870,7 @@ class UserManagementServiceTest {
     void rejectsUpdateUserWhenUserDoesNotExist() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UpdateUserCommand command = updateUserCommand();
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.empty());
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.empty());
 
         assertUserError(
                 () -> userManagementService.updateUser(jwt, command),
@@ -604,7 +880,7 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void doesNotUpdateKeycloakWhenUpdateUserLocalSaveFails() {
+    void restoresKeycloakWhenUpdateUserLocalSaveFails() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UpdateUserCommand command = updateUserCommand();
         User user = User.create(
@@ -619,31 +895,138 @@ class UserManagementServiceTest {
                 UserTenancy.HQ
         );
         RuntimeException failure = new RuntimeException("database write failed");
-        when(userRepository.findByKeycloakId(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
         when(userRepository.save(user)).thenThrow(failure);
 
         assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
                 .isSameAs(failure);
-        verify(userIdentityManager, never()).update(any(UpdateUserIdentityCommand.class));
+        ArgumentCaptor<UpdateUserIdentityCommand> commandCaptor = ArgumentCaptor.forClass(UpdateUserIdentityCommand.class);
+        verify(userIdentityManager, times(2)).update(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues().get(0).email()).isEqualTo(command.email());
+        assertThat(commandCaptor.getAllValues().get(1).email()).isEqualTo("old@erp.com");
+    }
+
+    @Test
+    void doesNotSaveLocalUserWhenUpdateUserKeycloakUpdateFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        RuntimeException failure = new RuntimeException("keycloak update failed");
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
+        doThrow(failure).when(userIdentityManager).update(any(UpdateUserIdentityCommand.class));
+
+        assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
+                .isSameAs(failure);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void restoresKeycloakWhenUpdateUserTransactionRollsBackAfterLocalSave() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserDetail detail = new UserDetail(
+                command.keycloakId(),
+                "HMC0001",
+                command.displayName(),
+                command.email(),
+                command.tenancyCode(),
+                command.tenancyName(),
+                command.role(),
+                command.position(),
+                UserStatus.ACTIVE,
+                LocalDate.parse("2023-04-12"),
+                LOGIN_AT,
+                PASSWORD_CHANGED_AT,
+                LocalDateTime.parse("2023-04-12T10:30:00")
+        );
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
+        when(userRepository.save(user)).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findDetailByKeycloakId(command.keycloakId())).thenReturn(Optional.of(detail));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            UserDetail result = userManagementService.updateUser(jwt, command);
+            assertThat(result).isSameAs(detail);
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(synchronization ->
+                            synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        ArgumentCaptor<UpdateUserIdentityCommand> commandCaptor = ArgumentCaptor.forClass(UpdateUserIdentityCommand.class);
+        verify(userIdentityManager, times(2)).update(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues().get(0).email()).isEqualTo(command.email());
+        assertThat(commandCaptor.getAllValues().get(1).email()).isEqualTo("old@erp.com");
     }
 
     @Test
     void createsUserInKeycloakAndLocalDatabaseWhenAdminRequests() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         CreateUserCommand command = createUserCommand();
-        UserIdentity identity = new UserIdentity(
-                "created-keycloak-id",
-                command.employeeNumber(),
-                command.email(),
-                command.displayName(),
-                command.tenancyCode(),
-                command.tenancyName(),
-                command.position(),
-                command.role(),
-                command.tenancy(),
-                true
-        );
-        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CreateUserResult result = userManagementService.createUser(jwt, command);
@@ -666,28 +1049,13 @@ class UserManagementServiceTest {
     void createsUserWithAutoGeneratedTemporaryPassword() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         CreateUserCommand command = autoPasswordCreateUserCommand();
-        when(userIdentityManager.create(any(CreateUserIdentityCommand.class)))
-                .thenAnswer(invocation -> {
-                    CreateUserIdentityCommand issuedCommand = invocation.getArgument(0);
-                    return new UserIdentity(
-                            "created-keycloak-id",
-                            issuedCommand.employeeNumber(),
-                            issuedCommand.email(),
-                            issuedCommand.displayName(),
-                            issuedCommand.tenancyCode(),
-                            issuedCommand.tenancyName(),
-                            issuedCommand.position(),
-                            issuedCommand.role(),
-                            issuedCommand.tenancy(),
-                            true
-                    );
-                });
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CreateUserResult result = userManagementService.createUser(jwt, command);
 
-        ArgumentCaptor<CreateUserIdentityCommand> commandCaptor =
-                ArgumentCaptor.forClass(CreateUserIdentityCommand.class);
+        ArgumentCaptor<CreateUserIdentityCommand> commandCaptor = ArgumentCaptor.forClass(CreateUserIdentityCommand.class);
         verify(userIdentityManager).create(commandCaptor.capture());
         String generatedPassword = commandCaptor.getValue().initialPassword();
         assertThat(generatedPassword)
@@ -701,36 +1069,61 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void deletesCreatedKeycloakUserWhenCreateUserTransactionRollsBackAfterLocalSave() {
+    void rejectsCreateUserWhenEmployeeNumberAlreadyExistsInLocalDatabase() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         CreateUserCommand command = createUserCommand();
-        UserIdentity identity = new UserIdentity(
-                "created-keycloak-id",
-                command.employeeNumber(),
-                command.email(),
-                command.displayName(),
-                command.tenancyCode(),
-                command.tenancyName(),
-                command.position(),
-                command.role(),
-                command.tenancy(),
-                true
-        );
-        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenReturn(identity);
+        when(userRepository.existsByEmployeeNumber(command.employeeNumber())).thenReturn(true);
+
+        assertThatThrownBy(() -> userManagementService.createUser(jwt, command))
+                .isInstanceOf(UserAlreadyExistsException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_ALREADY_EXISTS);
+
+        verify(userIdentityManager, never()).existsByEmployeeNumber(any(String.class));
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void rejectsCreateUserWhenEmployeeNumberAlreadyExistsInKeycloak() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        when(userIdentityManager.existsByEmployeeNumber(command.employeeNumber())).thenReturn(true);
+
+        assertThatThrownBy(() -> userManagementService.createUser(jwt, command))
+                .isInstanceOf(UserAlreadyExistsException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_ALREADY_EXISTS);
+
+        verify(userRepository).existsByEmployeeNumber(command.employeeNumber());
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void doesNotDeleteCreatedKeycloakUserWhenLocalSaveSucceeds() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            CreateUserResult result = userManagementService.createUser(jwt, command);
-            assertThat(result.user().getKeycloakId()).isEqualTo("created-keycloak-id");
+        userManagementService.createUser(jwt, command);
 
-            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
-            assertThat(synchronizations).hasSize(1);
-            synchronizations.forEach(synchronization ->
-                    synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
+        verify(userIdentityManager).existsByEmployeeNumber(command.employeeNumber());
+        verify(userIdentityManager).create(any(CreateUserIdentityCommand.class));
+        verify(userIdentityManager, never()).delete(any(String.class));
+    }
+
+    @Test
+    void deletesCreatedKeycloakUserWhenCreateUserLocalSaveFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        RuntimeException failure = new RuntimeException("database write failed");
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
+        when(userRepository.save(any(User.class))).thenThrow(failure);
+
+        assertThatThrownBy(() -> userManagementService.createUser(jwt, command))
+                .isSameAs(failure);
 
         verify(userIdentityManager).delete("created-keycloak-id");
     }
@@ -762,7 +1155,7 @@ class UserManagementServiceTest {
                 UserRole.BRANCH_STAFF,
                 UserTenancy.BRANCH
         );
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ResetPasswordResult result = userManagementService.resetPassword(jwt, targetKeycloakId);
@@ -789,13 +1182,13 @@ class UserManagementServiceTest {
                 UserErrorCode.USER_ADMIN_REQUIRED
         );
         verifyNoInteractions(userIdentityManager);
-        verify(userRepository, never()).findByKeycloakId(any(String.class));
+        verify(userRepository, never()).findByKeycloakIdForUpdate(any(String.class));
     }
 
     @Test
     void rejectsResetPasswordWhenUserDoesNotExist() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        when(userRepository.findByKeycloakId("missing-keycloak-id")).thenReturn(Optional.empty());
+        when(userRepository.findByKeycloakIdForUpdate("missing-keycloak-id")).thenReturn(Optional.empty());
 
         assertUserError(
                 () -> userManagementService.resetPassword(jwt, "missing-keycloak-id"),
@@ -821,7 +1214,7 @@ class UserManagementServiceTest {
                 UserTenancy.BRANCH
         );
         RuntimeException failure = new RuntimeException("database write failed");
-        when(userRepository.findByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
         when(userRepository.save(user)).thenThrow(failure);
 
         assertThatThrownBy(() -> userManagementService.resetPassword(jwt, targetKeycloakId))
@@ -1082,6 +1475,22 @@ class UserManagementServiceTest {
                 LOGIN_AT,
                 PASSWORD_CHANGED_AT,
                 LocalDateTime.parse("2023-04-12T10:30:00")
+        );
+    }
+
+    private UserIdentity identityFrom(CreateUserIdentityCommand command, String keycloakId) {
+        return new UserIdentity(
+                keycloakId,
+                command.employeeNumber(),
+                command.email(),
+                command.displayName(),
+                command.tenancyCode(),
+                command.tenancyName(),
+                command.position(),
+                command.role(),
+                command.tenancy(),
+                true,
+                true
         );
     }
 

@@ -13,6 +13,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -20,12 +21,20 @@ public interface UserJpaDao extends JpaRepository<UserEntity, Long>, JpaSpecific
 
     Optional<UserEntity> findByKeycloakId(String keycloakId);
 
+    Optional<UserEntity> findFirstByEmployeeNumberIgnoreCaseOrderByIdAsc(String employeeNumber);
+
+    long countByEmployeeNumberIgnoreCase(String employeeNumber);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from UserEntity u where u.keycloakId = :keycloakId")
     Optional<UserEntity> findByKeycloakIdForUpdate(@Param("keycloakId") String keycloakId);
 
     @Query("select u from UserEntity u where u.keycloakId = :keycloakId")
     Optional<UserEntity> findDetailByKeycloakId(@Param("keycloakId") String keycloakId);
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from UserEntity u where u.id = :id")
+    int deleteByIdIfExists(@Param("id") Long id);
 
     @Override
     Page<UserEntity> findAll(Specification<UserEntity> specification, Pageable pageable);
