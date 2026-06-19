@@ -321,8 +321,93 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void skipsDeletingLocalUsersWhenKeycloakReturnsEmptyResult() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        when(userIdentityManager.findAll()).thenReturn(List.of());
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository, never()).findAll();
+        verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    void skipsDeletingLocalUsersWhenKeycloakResultIsSignificantlySmallerThanLocalUsers() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ,
+                false,
+                false
+        );
+        User liveUser = User.create(
+                "live-keycloak-id",
+                "TEST001",
+                "test1@test.com",
+                "테스트1",
+                "HQ",
+                "본사",
+                "부장",
+                UserRole.HQ_MANAGER,
+                UserTenancy.HQ
+        );
+        User staleUser = User.create(
+                "stale-keycloak-id",
+                "stale001",
+                "stale@erp.com",
+                "삭제 대상",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        User anotherStaleUser = User.create(
+                "another-stale-keycloak-id",
+                "stale002",
+                "stale2@erp.com",
+                "삭제 대상2",
+                "HQ",
+                "본사",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(liveUser));
+        when(userRepository.save(liveUser)).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findAll()).thenReturn(List.of(liveUser, staleUser, anotherStaleUser));
+
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
+
+        verify(userRepository).save(liveUser);
+        verify(userRepository, never()).delete(staleUser);
+        verify(userRepository, never()).delete(anotherStaleUser);
+    }
+
+    @Test
     void doesNotDeletePendingUserWithoutKeycloakIdWhenAdminRequestsExplicitSync() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UserIdentity identity = new UserIdentity(
+                "live-keycloak-id",
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "BR-001",
+                "강남 1지점",
+                "부장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH,
+                true,
+                false
+        );
         User pendingUser = User.createPending(
                 null,
                 "pending001",
@@ -334,11 +419,14 @@ class UserManagementServiceTest {
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
         );
-        when(userIdentityManager.findAll()).thenReturn(List.of());
+        when(userIdentityManager.findAll()).thenReturn(List.of(identity));
+        when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.empty());
+        when(userRepository.findByEmployeeNumber(identity.employeeNumber())).thenReturn(Optional.empty());
         when(userRepository.findAll()).thenReturn(List.of(pendingUser));
 
         userManagementService.synchronizeUsersFromKeycloak(jwt);
 
+        verify(userRepository).save(any(User.class));
         verify(userRepository, never()).delete(pendingUser);
     }
 

@@ -33,6 +33,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class UserManagementService {
 
     private static final int KEYCLOAK_SYNC_MAX_ATTEMPTS = 3;
+    private static final double KEYCLOAK_DELETE_SAFETY_MIN_RATIO = 0.5D;
 
     private final UserManagementRepository userRepository;
     private final UserIdentityManager userIdentityManager;
@@ -332,7 +333,21 @@ public class UserManagementService {
                 .filter(this::hasText)
                 .collect(Collectors.toSet());
 
-        userRepository.findAll().stream()
+        if (keycloakIds.isEmpty()) {
+            log.warn("Keycloak 사용자 동기화 삭제를 건너뜁니다. Keycloak 사용자 ID 목록이 비어 있습니다.");
+            return;
+        }
+
+        List<User> localUsers = userRepository.findAll();
+        if (keycloakIds.size() < localUsers.size() * KEYCLOAK_DELETE_SAFETY_MIN_RATIO) {
+            log.warn("Keycloak 사용자 동기화 삭제를 건너뜁니다. Keycloak 사용자 수가 로컬 사용자 수보다 현저히 적습니다. "
+                            + "keycloakCount={}, localCount={}",
+                    keycloakIds.size(),
+                    localUsers.size());
+            return;
+        }
+
+        localUsers.stream()
                 .filter(user -> missingFromKeycloak(user, keycloakIds))
                 .forEach(userRepository::delete);
     }
