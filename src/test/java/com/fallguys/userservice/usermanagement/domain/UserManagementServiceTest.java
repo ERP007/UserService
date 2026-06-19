@@ -227,20 +227,18 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
         UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
-        when(userIdentityManager.findAll()).thenReturn(List.of());
         when(userRepository.findUsers(query)).thenReturn(expected);
 
         UserListPage actual = userManagementService.findUsers(jwt, query);
 
         assertThat(actual).isSameAs(expected);
-        verify(userIdentityManager).findAll();
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository).findUsers(query);
     }
 
     @Test
-    void synchronizesKeycloakUsersBeforeFindingUsers() {
+    void synchronizesKeycloakUsersWhenAdminRequestsExplicitSync() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        UserSearchQuery query = userSearchQuery();
         User existing = User.create(
                 "target-keycloak-id",
                 "old-employee",
@@ -265,15 +263,12 @@ class UserManagementServiceTest {
                 true,
                 true
         );
-        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
         when(userIdentityManager.findAll()).thenReturn(List.of(identity));
         when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(existing));
         when(userRepository.save(existing)).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userRepository.findUsers(query)).thenReturn(expected);
 
-        UserListPage actual = userManagementService.findUsers(jwt, query);
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
 
-        assertThat(actual).isSameAs(expected);
         assertThat(existing.getEmployeeNumber()).isEqualTo("branch001");
         assertThat(existing.getEmail()).isEqualTo("branch001@erp.com");
         assertThat(existing.getDisplayName()).isEqualTo("지점 담당자");
@@ -285,13 +280,11 @@ class UserManagementServiceTest {
         assertThat(existing.getStatus()).isEqualTo(UserStatus.PENDING);
         verify(userIdentityManager).findAll();
         verify(userRepository).save(existing);
-        verify(userRepository).findUsers(query);
     }
 
     @Test
-    void deletesLocalUsersMissingFromKeycloakBeforeFindingUsers() {
+    void deletesLocalUsersMissingFromKeycloakWhenAdminRequestsExplicitSync() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        UserSearchQuery query = userSearchQuery();
         UserIdentity identity = new UserIdentity(
                 "live-keycloak-id",
                 "branch001",
@@ -316,25 +309,20 @@ class UserManagementServiceTest {
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
         );
-        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
         when(userIdentityManager.findAll()).thenReturn(List.of(identity));
         when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.empty());
         when(userRepository.findByEmployeeNumber(identity.employeeNumber())).thenReturn(Optional.empty());
         when(userRepository.findAll()).thenReturn(List.of(staleUser));
-        when(userRepository.findUsers(query)).thenReturn(expected);
 
-        UserListPage actual = userManagementService.findUsers(jwt, query);
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
 
-        assertThat(actual).isSameAs(expected);
         verify(userRepository).save(any(User.class));
         verify(userRepository).delete(staleUser);
-        verify(userRepository).findUsers(query);
     }
 
     @Test
-    void doesNotDeletePendingUserWithoutKeycloakIdWhenSynchronizingKeycloakUsers() {
+    void doesNotDeletePendingUserWithoutKeycloakIdWhenAdminRequestsExplicitSync() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        UserSearchQuery query = userSearchQuery();
         User pendingUser = User.createPending(
                 null,
                 "pending001",
@@ -346,22 +334,17 @@ class UserManagementServiceTest {
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
         );
-        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
         when(userIdentityManager.findAll()).thenReturn(List.of());
         when(userRepository.findAll()).thenReturn(List.of(pendingUser));
-        when(userRepository.findUsers(query)).thenReturn(expected);
 
-        UserListPage actual = userManagementService.findUsers(jwt, query);
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
 
-        assertThat(actual).isSameAs(expected);
         verify(userRepository, never()).delete(pendingUser);
-        verify(userRepository).findUsers(query);
     }
 
     @Test
-    void deletesDuplicateLocalUserWhenEmployeeNumberMatchesButKeycloakIdDoesNotMatch() {
+    void deletesDuplicateLocalUserWhenEmployeeNumberMatchesButKeycloakIdDoesNotMatchOnExplicitSync() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
-        UserSearchQuery query = userSearchQuery();
         UserIdentity identity = new UserIdentity(
                 "live-keycloak-id",
                 "TEST001",
@@ -397,20 +380,28 @@ class UserManagementServiceTest {
                 UserRole.HQ_MANAGER,
                 UserTenancy.HQ
         );
-        UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
         when(userIdentityManager.findAll()).thenReturn(List.of(identity));
         when(userRepository.findByKeycloakId(identity.keycloakId())).thenReturn(Optional.of(liveUser));
         when(userRepository.save(liveUser)).thenAnswer(invocation -> invocation.getArgument(0));
         when(userRepository.findAll()).thenReturn(List.of(liveUser, staleDuplicate));
-        when(userRepository.findUsers(query)).thenReturn(expected);
 
-        UserListPage actual = userManagementService.findUsers(jwt, query);
+        userManagementService.synchronizeUsersFromKeycloak(jwt);
 
-        assertThat(actual).isSameAs(expected);
         verify(userRepository).save(liveUser);
         verify(userRepository, never()).delete(liveUser);
         verify(userRepository).delete(staleDuplicate);
-        verify(userRepository).findUsers(query);
+    }
+
+    @Test
+    void rejectsKeycloakSyncWhenRequesterIsNotAdmin() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "HQ_MANAGER", "부장");
+
+        assertUserError(
+                () -> userManagementService.synchronizeUsersFromKeycloak(jwt),
+                UserErrorCode.USER_ADMIN_REQUIRED
+        );
+        verify(userIdentityManager, never()).findAll();
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -431,13 +422,12 @@ class UserManagementServiceTest {
         Jwt jwt = jwt("admin001", "ADMIN", "HQ", "ADMIN", "관리자");
         UserSearchQuery query = userSearchQuery();
         UserListPage expected = new UserListPage(List.of(), 1, 10, 0, 0, false, false);
-        when(userIdentityManager.findAll()).thenReturn(List.of());
         when(userRepository.findUsers(query)).thenReturn(expected);
 
         UserListPage actual = userManagementService.findUsers(jwt, query);
 
         assertThat(actual).isSameAs(expected);
-        verify(userIdentityManager).findAll();
+        verify(userIdentityManager, never()).findAll();
         verify(userRepository).findUsers(query);
     }
 

@@ -42,22 +42,40 @@ public class UserManagementService {
      *
      * 흐름:
      * 1) JWT Claim의 tenancy_code와 user_role이 모두 ADMIN인지 확인한다.
-     * 2) Keycloak 전체 ERP 사용자 정보를 조회해 로컬 사용자 DB에 upsert한다.
-     * 3) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
-     * 4) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
+정     * 2) 조회 조건(keyword, role, tenancyCode, status)과 정렬·페이지 조건을 repository에 전달한다.
+     * 3) repository가 검색 결과와 전체 페이지 정보를 함께 반환한다.
      *
-     * 트랜잭션: 쓰기. Keycloak 조회 성공 후 로컬 사용자 정보와 상태를 최신 인증 정보 기준으로 반영한다.
+     * 트랜잭션: 읽기 전용. 사용자 목록 조회만 수행하며 Keycloak 전체 동기화는 수행하지 않는다.
      *
      * 예외:
      * - 관리자 Claim 조건 불만족: UserException(403 매핑), 조회 중단.
      * - 필수 권한 Claim 누락 또는 미지원 값: UserException(403 매핑), 조회 중단.
-     * - Keycloak 전체 사용자 조회 실패: UserIdentityException(502 매핑), 로컬 동기화 및 목록 조회 중단.
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public UserListPage findUsers(Jwt jwt, UserSearchQuery query) {
         JwtClaims.requireAdmin(jwt);
-        synchronizeUsersFromKeycloak();
         return userRepository.findUsers(query);
+    }
+
+    /**
+     * 관리자 요청으로 Keycloak 전체 사용자 정보를 로컬 사용자 DB와 동기화한다.
+     *
+     * 흐름:
+     * 1) JWT Claim의 tenancy_code와 user_role이 모두 ADMIN인지 확인한다.
+     * 2) Keycloak 전체 ERP 사용자 정보를 조회한다.
+     * 3) Keycloak 사용자별로 로컬 사용자 DB에 upsert한다.
+     * 4) Keycloak에 더 이상 없는 로컬 사용자를 삭제한다.
+     *
+     * 트랜잭션: 쓰기. 전체 동기화 중 예외가 발생하면 로컬 DB 변경은 롤백된다.
+     *
+     * 예외:
+     * - 관리자 Claim 조건 불만족: UserException(403 매핑), 동기화 중단.
+     * - Keycloak 전체 사용자 조회 실패: UserIdentityException(502 매핑), 동기화 중단.
+     */
+    @Transactional
+    public void synchronizeUsersFromKeycloak(Jwt jwt) {
+        JwtClaims.requireAdmin(jwt);
+        synchronizeUsersFromKeycloak();
     }
 
     /**
