@@ -155,7 +155,7 @@ public class UserManagementService {
                     command.tenancy()
             );
             userRepository.save(user);
-            publishAuthorityChangedEventAfterCommitIfNeeded(previousRole, user);
+            saveAuthorityChangedEventIfNeeded(previousRole, user);
 
             return userRepository.findDetailByKeycloakId(command.keycloakId())
                     .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
@@ -307,34 +307,15 @@ public class UserManagementService {
         }
     }
 
-    private void publishAuthorityChangedEventAfterCommitIfNeeded(UserRole previousRole, User user) {
+    private void saveAuthorityChangedEventIfNeeded(UserRole previousRole, User user) {
         if (previousRole == user.getRole()) {
             return;
         }
 
-        UserAuthorityChangedEvent event = new UserAuthorityChangedEvent(
+        userAuthorityChangedEventPublisher.publish(new UserAuthorityChangedEvent(
                 user.getKeycloakId(),
                 user.getEmployeeNumber()
-        );
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            publishAuthorityChangedEvent(event);
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                publishAuthorityChangedEvent(event);
-            }
-        });
-    }
-
-    private void publishAuthorityChangedEvent(UserAuthorityChangedEvent event) {
-        try {
-            userAuthorityChangedEventPublisher.publish(event);
-        } catch (RuntimeException ex) {
-            log.warn("사용자 권한 변경 이벤트 발행 실패. keycloakSub={}", event.keycloakSub(), ex);
-        }
+        ));
     }
 
     private UserIdentityState suspensionTargetState(String keycloakId, boolean targetEnabled) {

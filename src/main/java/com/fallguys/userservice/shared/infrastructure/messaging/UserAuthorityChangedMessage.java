@@ -19,7 +19,7 @@ public record UserAuthorityChangedMessage(
     private static final String PRODUCER = "user-service";
     private static final String REASON = "USER_PROFILE_UPDATED";
 
-    static UserAuthorityChangedMessage from(UserAuthorityChangedEvent event) {
+    public static UserAuthorityChangedMessage from(UserAuthorityChangedEvent event) {
         return new UserAuthorityChangedMessage(
                 UUID.randomUUID().toString(),
                 EVENT_TYPE,
