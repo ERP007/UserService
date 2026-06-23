@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -26,6 +27,7 @@ import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedExcepti
 import com.fallguys.userservice.shared.domain.exception.UserAlreadyExistsException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
+import com.fallguys.userservice.shared.domain.exception.UserIdentityException;
 import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentity;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
@@ -1402,6 +1404,174 @@ class UserManagementServiceTest {
         verify(userRepository).findByKeycloakIdForUpdate(targetKeycloakId);
         verify(userIdentityManager, never()).findState(any(String.class));
         verify(userIdentityManager, never()).updateEnabled(any(String.class), anyBoolean());
+    }
+
+    @Test
+    void rejectsUpdateUserWhenKeycloakIdentityNotFound() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
+                .isInstanceOf(UserIdentityException.class)
+                .extracting("errorCode")
+                .isEqualTo(UserErrorCode.USER_IDENTITY_READ_FAILED);
+        verify(userRepository, never()).save(any(User.class));
+        verify(userIdentityManager, never()).update(any(UpdateUserIdentityCommand.class));
+    }
+
+    @Test
+    void suppressesRestoreExceptionOntoOriginalFailureWhenKeycloakRestoreFails() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        RuntimeException saveFailure = new RuntimeException("database write failed");
+        RuntimeException restoreFailure = new RuntimeException("keycloak restore failed");
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
+        when(userRepository.save(user)).thenThrow(saveFailure);
+        doAnswer(invocation -> {
+            UpdateUserIdentityCommand updateCommand = invocation.getArgument(0);
+            if ("old@erp.com".equals(updateCommand.email())) {
+                throw restoreFailure;
+            }
+            return null;
+        }).when(userIdentityManager).update(any(UpdateUserIdentityCommand.class));
+
+        assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
+                .isSameAs(saveFailure)
+                .satisfies(ex -> assertThat(ex.getSuppressed()).contains(restoreFailure));
+    }
+
+    @Test
+    void deletesCreatedKeycloakUserWhenCreateUserTransactionRollsBackAfterLocalSave() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            CreateUserResult result = userManagementService.createUser(jwt, command);
+            assertThat(result.user().getKeycloakId()).isEqualTo("created-keycloak-id");
+
+            List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(synchronizations).hasSize(1);
+            synchronizations.forEach(synchronization ->
+                    synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        verify(userIdentityManager).delete("created-keycloak-id");
+    }
+
+    @Test
+    void doesNotDeleteCreatedKeycloakUserWhenTransactionCommitsSuccessfully() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        CreateUserCommand command = createUserCommand();
+        when(userIdentityManager.create(any(CreateUserIdentityCommand.class))).thenAnswer(invocation ->
+                identityFrom(invocation.getArgument(0), "created-keycloak-id"));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            CreateUserResult result = userManagementService.createUser(jwt, command);
+            assertThat(result.user().getKeycloakId()).isEqualTo("created-keycloak-id");
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(synchronization ->
+                            synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        verify(userIdentityManager, never()).delete(any(String.class));
+    }
+
+    @Test
+    void keycloakRestoreRunsOnlyOnceEvenIfTransactionRollbackAndLocalSaveFailBothOccur() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        UpdateUserCommand command = updateUserCommand();
+        User user = User.create(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        RuntimeException saveFailure = new RuntimeException("database write failed");
+        when(userRepository.findByKeycloakIdForUpdate(command.keycloakId())).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(command.keycloakId())).thenReturn(Optional.of(new UserIdentity(
+                command.keycloakId(),
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
+        when(userRepository.save(user)).thenThrow(saveFailure);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThatThrownBy(() -> userManagementService.updateUser(jwt, command))
+                    .isSameAs(saveFailure);
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(synchronization ->
+                            synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        ArgumentCaptor<UpdateUserIdentityCommand> commandCaptor = ArgumentCaptor.forClass(UpdateUserIdentityCommand.class);
+        verify(userIdentityManager, times(2)).update(commandCaptor.capture());
+        assertThat(commandCaptor.getAllValues().get(0).email()).isEqualTo(command.email());
+        assertThat(commandCaptor.getAllValues().get(1).email()).isEqualTo("old@erp.com");
     }
 
     private UserSearchQuery userSearchQuery() {
