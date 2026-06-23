@@ -12,7 +12,7 @@ import lombok.Getter;
 public class User {
 
     private final Long id;
-    private final String keycloakId;
+    private String keycloakId;
     private String employeeNumber;
     private String email;
     private String displayName;
@@ -82,6 +82,22 @@ public class User {
                 null,
                 null
         );
+    }
+
+    public static User createFromIdentity(UserIdentity identity) {
+        User user = User.create(
+                identity.keycloakId(),
+                identity.employeeNumber(),
+                identity.email(),
+                identity.displayName(),
+                identity.tenancyCode(),
+                identity.tenancyName(),
+                identity.position(),
+                identity.role(),
+                identity.tenancy()
+        );
+        user.applyIdentityState(identity.state());
+        return user;
     }
 
     public static User restore(
@@ -196,6 +212,27 @@ public class User {
         this.position = position;
         this.role = role;
         this.tenancy = tenancy;
+    }
+
+    public void syncIdentityProfile(UserIdentity identity) {
+        this.keycloakId = identity.keycloakId();
+        this.employeeNumber = identity.employeeNumber();
+        this.email = identity.email();
+        this.displayName = identity.displayName();
+        this.tenancyCode = identity.tenancyCode();
+        this.tenancyName = tenancyNameOrCode(identity.tenancyName(), identity.tenancyCode());
+        this.position = identity.position();
+        this.role = identity.role();
+        this.tenancy = identity.tenancy();
+        applyIdentityState(identity.state());
+    }
+
+    public void assignKeycloakId(String keycloakId) {
+        if (!hasText(keycloakId)) {
+            return;
+        }
+
+        this.keycloakId = keycloakId.trim();
     }
 
     public void markPasswordResetRequired() {

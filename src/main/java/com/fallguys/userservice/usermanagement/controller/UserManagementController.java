@@ -107,6 +107,17 @@ class UserManagementController {
         return CreateUserResponse.from(userManagementService.createUser(authenticatedJwt, request.toCommand()));
     }
 
+    @Operation(summary = "Keycloak 사용자 동기화", description = "관리자가 Keycloak 전체 사용자 정보를 로컬 사용자 DB와 동기화합니다.")
+    @SecurityRequirement(name = BEARER_AUTH)
+    @PostMapping("/sync/keycloak")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void synchronizeKeycloakUsers(
+            @Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt
+    ) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        userManagementService.synchronizeUsersFromKeycloak(authenticatedJwt);
+    }
+
     @Operation(summary = "사용자 비밀번호 초기화", description = "관리자가 사용자 임시 비밀번호를 재발급합니다.")
     @SecurityRequirement(name = BEARER_AUTH)
     @PatchMapping("/{keycloakId}/reset-password")

@@ -5,11 +5,18 @@ import com.fallguys.userservice.shared.domain.model.UserIdentityState;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface UserIdentityManager {
 
     Optional<UserIdentity> findById(String keycloakId);
+
+    Optional<UserIdentity> findByEmployeeNumber(String employeeNumber);
+
+    boolean existsByEmployeeNumber(String employeeNumber);
+
+    List<UserIdentity> findAll();
 
     Optional<Instant> findPasswordChangedAt(String keycloakId);
 

@@ -40,7 +40,7 @@ public class UserEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "keycloak_id", nullable = false, unique = true, length = 100)
+    @Column(name = "keycloak_id", unique = true, length = 100)
     private String keycloakId;
 
     @Column(name = "employee_number", nullable = false, length = 100)
