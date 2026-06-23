@@ -10,6 +10,11 @@ public record UserIdentity(
         String position,
         UserRole role,
         UserTenancy tenancy,
-        boolean enabled
+        boolean enabled,
+        boolean passwordUpdateRequired
 ) {
+
+    public UserIdentityState state() {
+        return new UserIdentityState(enabled, passwordUpdateRequired);
+    }
 }

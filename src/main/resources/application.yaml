@@ -18,6 +18,23 @@ spring:
     hibernate:
       ddl-auto: update
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: "${RABBITMQ_VIRTUAL_HOST:/}"
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+      retry:
+        enabled: true
+        max-attempts: 3
+        initial-interval: 500ms
+        multiplier: 2
+        max-interval: 3s
+
   security:
     oauth2:
       resourceserver:
@@ -33,6 +50,16 @@ keycloak:
     connect-timeout: ${KEYCLOAK_ADMIN_CONNECT_TIMEOUT:3s}
     read-timeout: ${KEYCLOAK_ADMIN_READ_TIMEOUT:10s}
 
+user-authority:
+  rabbitmq:
+    exchange: ${USER_AUTHORITY_EXCHANGE:erp.events}
+    routing-key: ${USER_AUTHORITY_CHANGED_ROUTING_KEY:user.authority.changed.gateway}
+
+outbox:
+  relay:
+    fixed-delay-ms: ${OUTBOX_RELAY_FIXED_DELAY_MS:1000}
+    batch-size: ${OUTBOX_RELAY_BATCH_SIZE:50}
+    max-attempts: ${OUTBOX_RELAY_MAX_ATTEMPTS:10}
 springdoc:
   api-docs:
     path: /users/v3/api-docs

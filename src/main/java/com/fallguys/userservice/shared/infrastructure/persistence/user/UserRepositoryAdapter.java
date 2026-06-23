@@ -36,18 +36,56 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
 
     @Override
     public Optional<User> findByKeycloakId(String keycloakId) {
+        if (!StringUtils.hasText(keycloakId)) {
+            return Optional.empty();
+        }
+
         return userJpaDao.findByKeycloakId(keycloakId).map(UserEntity::toDomain);
     }
 
     @Override
+    public Optional<User> findById(Long id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+
+        return userJpaDao.findById(id).map(UserEntity::toDomain);
+    }
+
+    @Override
+    public Optional<User> findByEmployeeNumber(String employeeNumber) {
+        if (!StringUtils.hasText(employeeNumber)) {
+            return Optional.empty();
+        }
+
+        return userJpaDao.findFirstByEmployeeNumberIgnoreCaseOrderByIdAsc(employeeNumber).map(UserEntity::toDomain);
+    }
+
+    @Override
     public Optional<User> findByKeycloakIdForUpdate(String keycloakId) {
+        if (!StringUtils.hasText(keycloakId)) {
+            return Optional.empty();
+        }
+
         return userJpaDao.findByKeycloakIdForUpdate(keycloakId).map(UserEntity::toDomain);
+    }
+
+    @Override
+    public boolean existsByEmployeeNumber(String employeeNumber) {
+        return userJpaDao.countByEmployeeNumberIgnoreCase(employeeNumber) > 0;
     }
 
     @Override
     public Optional<UserDetail> findDetailByKeycloakId(String keycloakId) {
         return userJpaDao.findDetailByKeycloakId(keycloakId)
                 .map(this::toDetail);
+    }
+
+    @Override
+    public List<User> findAll() {
+        return userJpaDao.findAll().stream()
+                .map(UserEntity::toDomain)
+                .toList();
     }
 
     @Override
@@ -88,6 +126,15 @@ public class UserRepositoryAdapter implements SessionRepository, MyPageRepositor
                           "User entity with id=" + user.getId() + " not found in database"));
 
         return userJpaDao.save(entity).toDomain();
+    }
+
+    @Override
+    public void delete(User user) {
+        if (user == null || user.getId() == null) {
+            return;
+        }
+
+        userJpaDao.deleteByIdIfExists(user.getId());
     }
 
     private Specification<UserEntity> specification(UserSearchQuery query) {

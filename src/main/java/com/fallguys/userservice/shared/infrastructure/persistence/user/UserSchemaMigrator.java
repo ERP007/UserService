@@ -25,9 +25,18 @@ public class UserSchemaMigrator implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         lockMigration();
+        allowPendingUserWithoutKeycloakId();
         migrateTenancyNameColumn();
         dropTenancyForeignKeyIfPresent();
         dropTenanciesTableIfPresent();
+    }
+
+    private void allowPendingUserWithoutKeycloakId() {
+        if (!tableExists("users") || !columnExists("users", "keycloak_id")) {
+            return;
+        }
+
+        jdbcTemplate.execute("alter table users alter column keycloak_id drop not null");
     }
 
     /**
