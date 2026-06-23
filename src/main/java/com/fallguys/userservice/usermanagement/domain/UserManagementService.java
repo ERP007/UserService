@@ -37,6 +37,7 @@ public class UserManagementService {
 
     private final UserManagementRepository userRepository;
     private final UserIdentityManager userIdentityManager;
+    private final UserAuthorityChangedEventPublisher userAuthorityChangedEventPublisher;
 
     /**
      * 관리자 전용 사용자 목록을 조회한다.
@@ -127,6 +128,7 @@ public class UserManagementService {
 
         User user = userRepository.findByKeycloakIdForUpdate(command.keycloakId())
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
+        UserRole previousRole = user.getRole();
         UpdateUserIdentityCommand previousIdentityCommand = previousIdentityCommand(command.keycloakId());
         UpdateUserIdentityCommand identityCommand = new UpdateUserIdentityCommand(
                 command.keycloakId(),
@@ -153,6 +155,7 @@ public class UserManagementService {
                     command.tenancy()
             );
             userRepository.save(user);
+            publishAuthorityChangedEventAfterCommitIfNeeded(previousRole, user);
 
             return userRepository.findDetailByKeycloakId(command.keycloakId())
                     .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
@@ -301,6 +304,36 @@ public class UserManagementService {
 
         if (activeAdminCount <= 1) {
             throw new UserException(UserErrorCode.USER_LAST_ADMIN_SUSPENSION_NOT_ALLOWED);
+        }
+    }
+
+    private void publishAuthorityChangedEventAfterCommitIfNeeded(UserRole previousRole, User user) {
+        if (previousRole == user.getRole()) {
+            return;
+        }
+
+        UserAuthorityChangedEvent event = new UserAuthorityChangedEvent(
+                user.getKeycloakId(),
+                user.getEmployeeNumber()
+        );
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publishAuthorityChangedEvent(event);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                publishAuthorityChangedEvent(event);
+            }
+        });
+    }
+
+    private void publishAuthorityChangedEvent(UserAuthorityChangedEvent event) {
+        try {
+            userAuthorityChangedEventPublisher.publish(event);
+        } catch (RuntimeException ex) {
+            log.warn("사용자 권한 변경 이벤트 발행 실패. keycloakSub={}", event.keycloakSub(), ex);
         }
     }
 
