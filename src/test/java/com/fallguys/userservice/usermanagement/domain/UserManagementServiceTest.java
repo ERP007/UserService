@@ -911,16 +911,81 @@ class UserManagementServiceTest {
         verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
         assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
+        verify(userIdentityManager).logoutSessions(targetKeycloakId);
     }
 
     @Test
-    void doesNotPublishAuthorityChangedEventWhenRoleIsUnchanged() {
+    void doesNotPublishAuthorityChangedEventWhenSessionScopedAttributesAreUnchanged() {
         Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
         String targetKeycloakId = "target-keycloak-id";
         UpdateUserCommand command = new UpdateUserCommand(
                 targetKeycloakId,
-                "updated@erp.com",
-                "수정 사용자",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        User user = User.create(
+                targetKeycloakId,
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserDetail detail = new UserDetail(
+                targetKeycloakId,
+                "HMC0001",
+                "기존 사용자",
+                "old@erp.com",
+                "HQ",
+                "본사",
+                UserRole.HQ_STAFF,
+                "STAFF",
+                UserStatus.ACTIVE,
+                LocalDate.parse("2023-04-12"),
+                LOGIN_AT,
+                PASSWORD_CHANGED_AT,
+                LocalDateTime.parse("2023-04-12T10:30:00")
+        );
+        when(userRepository.findByKeycloakIdForUpdate(targetKeycloakId)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findById(targetKeycloakId)).thenReturn(Optional.of(new UserIdentity(
+                targetKeycloakId,
+                "HMC0001",
+                "old@erp.com",
+                "기존 사용자",
+                "HQ",
+                "본사",
+                "STAFF",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ,
+                true,
+                false
+        )));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findDetailByKeycloakId(targetKeycloakId)).thenReturn(Optional.of(detail));
+
+        UserDetail result = userManagementService.updateUser(jwt, command);
+
+        assertThat(result).isSameAs(detail);
+        verify(userAuthorityChangedEventPublisher, never()).publish(any(UserAuthorityChangedEvent.class));
+        verify(userIdentityManager, never()).logoutSessions(any(String.class));
+    }
+
+    @Test
+    void publishesAuthorityChangedEventAndLogsOutSessionsWhenPositionChanges() {
+        Jwt jwt = jwt("admin001", "ADMIN", "ADMIN", "ADMIN", "관리자");
+        String targetKeycloakId = "target-keycloak-id";
+        UpdateUserCommand command = new UpdateUserCommand(
+                targetKeycloakId,
+                "old@erp.com",
+                "기존 사용자",
                 "HQ",
                 "본사",
                 "MANAGER",
@@ -941,8 +1006,8 @@ class UserManagementServiceTest {
         UserDetail detail = new UserDetail(
                 targetKeycloakId,
                 "HMC0001",
-                "수정 사용자",
-                "updated@erp.com",
+                "기존 사용자",
+                "old@erp.com",
                 "HQ",
                 "본사",
                 UserRole.HQ_STAFF,
@@ -973,7 +1038,12 @@ class UserManagementServiceTest {
         UserDetail result = userManagementService.updateUser(jwt, command);
 
         assertThat(result).isSameAs(detail);
-        verify(userAuthorityChangedEventPublisher, never()).publish(any(UserAuthorityChangedEvent.class));
+        ArgumentCaptor<UserAuthorityChangedEvent> eventCaptor =
+                ArgumentCaptor.forClass(UserAuthorityChangedEvent.class);
+        verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
+        assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
+        verify(userIdentityManager).logoutSessions(targetKeycloakId);
     }
 
     @Test
@@ -1017,6 +1087,7 @@ class UserManagementServiceTest {
         verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(command.keycloakId());
         assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
+        verify(userIdentityManager).logoutSessions(command.keycloakId());
     }
 
     @Test
