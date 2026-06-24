@@ -180,6 +180,51 @@ class UserManagementServiceTest {
     }
 
     @Test
+    void refreshesExistingUserFromLatestKeycloakIdentityBeforeTokenClaims() {
+        User existing = User.create(
+                KEYCLOAK_ID,
+                "admin001",
+                "admin001@erp.com",
+                "윤 영선",
+                "WH-HQ-001",
+                "본사 중앙창고",
+                "사원",
+                UserRole.HQ_STAFF,
+                UserTenancy.HQ
+        );
+        UserIdentity latestIdentity = new UserIdentity(
+                KEYCLOAK_ID,
+                "admin001",
+                "admin001@erp.com",
+                "윤 영선",
+                "ADMIN",
+                "관리자",
+                "관리자",
+                UserRole.ADMIN,
+                UserTenancy.ADMIN,
+                true,
+                false
+        );
+        Jwt jwtWithStaleClaims = jwt("admin001", "WH-HQ-001", "HQ", "HQ_STAFF", "사원");
+        when(userIdentityManager.findById(KEYCLOAK_ID)).thenReturn(Optional.of(latestIdentity));
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(existing));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        User user = sessionService.synchronizeSession(jwtWithStaleClaims);
+
+        assertThat(user).isSameAs(existing);
+        assertThat(user.getTenancyCode()).isEqualTo("ADMIN");
+        assertThat(user.getTenancyName()).isEqualTo("관리자");
+        assertThat(user.getPosition()).isEqualTo("관리자");
+        assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
+        assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+        verify(userIdentityManager).findById(KEYCLOAK_ID);
+        verify(userRepository).save(existing);
+    }
+
+    @Test
     void skipsSaveWhenSessionClaimsAndLoginMetadataAreUnchanged() {
         User existing = User.create(
                 KEYCLOAK_ID,
