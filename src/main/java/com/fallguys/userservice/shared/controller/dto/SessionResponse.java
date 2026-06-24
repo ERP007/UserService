@@ -1,34 +1,20 @@
 package com.fallguys.userservice.shared.controller.dto;
 
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.util.StringUtils;
+import com.fallguys.userservice.shared.domain.model.User;
 
 public record SessionResponse(
         SessionContentResponse content
 ) {
 
-    public static SessionResponse from(Jwt jwt) {
-        String employeeNumber = jwt.getClaimAsString("employee_no");
-        String name = claimOrDefault(jwt, "name", employeeNumber);
-        String tenancyCode = jwt.getClaimAsString("tenancy_code");
-        String tenancyName = claimOrDefault(jwt, "tenancy_name", tenancyCode);
-
+    public static SessionResponse from(User user) {
         return new SessionResponse(new SessionContentResponse(
-                tenancyCode,
-                tenancyName,
-                jwt.getClaimAsString("user_role"),
-                jwt.getClaimAsString("position"),
-                employeeNumber,
-                name
+                user.getTenancyCode(),
+                user.getTenancyName(),
+                user.getTenancy() == null ? user.getTenancyCode() : user.getTenancy().name(),
+                user.getRole().name(),
+                user.getPosition(),
+                user.getEmployeeNumber(),
+                user.getDisplayName()
         ));
-    }
-
-    private static String claimOrDefault(Jwt jwt, String claimName, String defaultValue) {
-        String claimValue = jwt.getClaimAsString(claimName);
-        if (StringUtils.hasText(claimValue)) {
-            return claimValue;
-        }
-
-        return defaultValue;
     }
 }

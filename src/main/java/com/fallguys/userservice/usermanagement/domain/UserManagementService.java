@@ -16,6 +16,7 @@ import com.fallguys.userservice.shared.domain.model.UserRole;
 import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -38,6 +39,7 @@ public class UserManagementService {
     private final UserManagementRepository userRepository;
     private final UserIdentityManager userIdentityManager;
     private final UserAuthorityChangedEventPublisher userAuthorityChangedEventPublisher;
+    private final UserSessionLogoutEventPublisher userSessionLogoutEventPublisher;
 
     /**
      * 관리자 전용 사용자 목록을 조회한다.
@@ -128,7 +130,6 @@ public class UserManagementService {
 
         User user = userRepository.findByKeycloakIdForUpdate(command.keycloakId())
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
-        UserRole previousRole = user.getRole();
         UpdateUserIdentityCommand previousIdentityCommand = previousIdentityCommand(command.keycloakId());
         UpdateUserIdentityCommand identityCommand = new UpdateUserIdentityCommand(
                 command.keycloakId(),
@@ -140,6 +141,7 @@ public class UserManagementService {
                 command.role(),
                 command.tenancy()
         );
+        boolean sessionInvalidationRequired = sessionInvalidationRequired(previousIdentityCommand, identityCommand);
         userIdentityManager.update(identityCommand);
         AtomicBoolean identityRestored = new AtomicBoolean(false);
         registerIdentityRestoreRollbackCleanup(previousIdentityCommand, identityRestored);
@@ -155,7 +157,8 @@ public class UserManagementService {
                     command.tenancy()
             );
             userRepository.save(user);
-            saveAuthorityChangedEventIfNeeded(previousRole, user);
+            saveAuthorityChangedEventIfNeeded(sessionInvalidationRequired, user);
+            saveSessionLogoutEventIfNeeded(sessionInvalidationRequired, user.getKeycloakId());
 
             return userRepository.findDetailByKeycloakId(command.keycloakId())
                     .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
@@ -307,8 +310,21 @@ public class UserManagementService {
         }
     }
 
-    private void saveAuthorityChangedEventIfNeeded(UserRole previousRole, User user) {
-        if (previousRole == user.getRole()) {
+    private boolean sessionInvalidationRequired(
+            UpdateUserIdentityCommand previous,
+            UpdateUserIdentityCommand current
+    ) {
+        return !Objects.equals(previous.email(), current.email())
+                || !Objects.equals(previous.displayName(), current.displayName())
+                || !Objects.equals(previous.tenancyCode(), current.tenancyCode())
+                || !Objects.equals(previous.tenancyName(), current.tenancyName())
+                || previous.tenancy() != current.tenancy()
+                || !Objects.equals(previous.position(), current.position())
+                || previous.role() != current.role();
+    }
+
+    private void saveAuthorityChangedEventIfNeeded(boolean sessionInvalidationRequired, User user) {
+        if (!sessionInvalidationRequired) {
             return;
         }
 
@@ -316,6 +332,14 @@ public class UserManagementService {
                 user.getKeycloakId(),
                 user.getEmployeeNumber()
         ));
+    }
+
+    private void saveSessionLogoutEventIfNeeded(boolean sessionInvalidationRequired, String keycloakId) {
+        if (!sessionInvalidationRequired) {
+            return;
+        }
+
+        userSessionLogoutEventPublisher.publish(new UserSessionLogoutEvent(keycloakId));
     }
 
     private UserIdentityState suspensionTargetState(String keycloakId, boolean targetEnabled) {

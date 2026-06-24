@@ -8,6 +8,7 @@ import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxE
 import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxEventJpaDao;
 import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxEventStatus;
 import com.fallguys.userservice.usermanagement.domain.UserAuthorityChangedEvent;
+import com.fallguys.userservice.usermanagement.domain.UserSessionLogoutEvent;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.Message;
@@ -56,6 +57,37 @@ class RabbitUserAuthorityChangedEventPublisherTest {
         assertThat(message.payload().keycloakSub()).isEqualTo("4997ac1b-eb49-48fc-858c-a009f30b0533");
         assertThat(message.payload().employeeNo()).isEqualTo("ADMIN002");
         assertThat(message.payload().reason()).isEqualTo("USER_PROFILE_UPDATED");
+    }
+
+    @Test
+    void storesUserSessionLogoutMessageAsPendingOutboxEvent() throws Exception {
+        OutboxEventJpaDao outboxEventJpaDao = mock(OutboxEventJpaDao.class);
+        OutboxUserSessionLogoutEventPublisher publisher =
+                new OutboxUserSessionLogoutEventPublisher(outboxEventJpaDao, new ObjectMapper());
+
+        publisher.publish(new UserSessionLogoutEvent("4997ac1b-eb49-48fc-858c-a009f30b0533"));
+
+        ArgumentCaptor<OutboxEventEntity> eventCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventJpaDao).save(eventCaptor.capture());
+        OutboxEventEntity event = eventCaptor.getValue();
+        assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.PENDING);
+        assertThat(event.getEventType()).isEqualTo("keycloak.user.sessions.logout");
+        assertThat(event.getExchangeName()).isEqualTo("internal");
+        assertThat(event.getRoutingKey()).isEqualTo("keycloak.user.sessions.logout");
+        assertThat(event.getAggregateType()).isEqualTo("USER");
+        assertThat(event.getAggregateId()).isEqualTo("4997ac1b-eb49-48fc-858c-a009f30b0533");
+
+        UserSessionLogoutMessage message = new ObjectMapper()
+                .readValue(event.getPayload(), UserSessionLogoutMessage.class);
+        assertThat(message.eventId()).isNotBlank();
+        assertThat(message.eventId()).isEqualTo(event.getEventId());
+        assertThat(message.eventType()).isEqualTo("keycloak.user.sessions.logout");
+        assertThat(message.eventVersion()).isEqualTo(1);
+        assertThat(message.producer()).isEqualTo("user-service");
+        assertThat(message.occurredAt()).isNotBlank();
+        assertThat(message.correlationId()).isEqualTo("USER-4997ac1b-eb49-48fc-858c-a009f30b0533");
+        assertThat(message.payload().keycloakSub()).isEqualTo("4997ac1b-eb49-48fc-858c-a009f30b0533");
+        assertThat(message.payload().reason()).isEqualTo("SESSION_SCOPED_PROFILE_UPDATED");
     }
 
     @Test

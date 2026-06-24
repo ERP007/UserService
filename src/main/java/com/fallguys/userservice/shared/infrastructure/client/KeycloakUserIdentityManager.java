@@ -240,6 +240,17 @@ public class KeycloakUserIdentityManager implements UserIdentityManager {
         }
     }
 
+    @Override
+    public void logoutSessions(String keycloakId) {
+        try {
+            user(keycloakId).logout();
+        } catch (NotFoundException ex) {
+            return;
+        } catch (ProcessingException | WebApplicationException ex) {
+            throw new UserIdentityException(UserErrorCode.USER_IDENTITY_LOGOUT_FAILED, ex);
+        }
+    }
+
     private UsersResource users() {
         return keycloak.realm(properties.realm()).users();
     }
