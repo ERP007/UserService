@@ -30,5 +30,7 @@ public interface UserIdentityManager {
 
     void updateEnabled(String keycloakId, boolean enabled);
 
+    void logoutSessions(String keycloakId);
+
     void delete(String keycloakId);
 }

@@ -4,6 +4,7 @@ import com.fallguys.userservice.shared.controller.dto.SessionResponse;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.exception.CommonErrorCode;
 import com.fallguys.userservice.shared.domain.exception.CommonException;
+import com.fallguys.userservice.shared.domain.model.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -32,8 +33,8 @@ class SessionController {
     SessionResponse session(@Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt) {
         Jwt authenticatedJwt = requireJwt(jwt);
 
-        sessionService.synchronizeSession(authenticatedJwt);
-        return SessionResponse.from(authenticatedJwt);
+        User user = sessionService.synchronizeSession(authenticatedJwt);
+        return SessionResponse.from(user);
     }
 
     private Jwt requireJwt(Jwt jwt) {
