@@ -12,6 +12,7 @@ import com.fallguys.userservice.shared.domain.activity.ActivityLogService;
 import com.fallguys.userservice.shared.domain.activity.UserActionType;
 import com.fallguys.userservice.shared.domain.command.CreateActivityLogCommand;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -59,6 +60,17 @@ class ActivityLogServiceTest {
         service.record(command());
 
         verify(activityLogRepository, never()).save(any(ActivityLog.class));
+    }
+
+    @Test
+    void findsRecentActivityLogsByEmployeeNo() {
+        ActivityLogService service = new ActivityLogService(activityLogRepository);
+        ActivityLog activityLog = ActivityLog.create(command());
+        when(activityLogRepository.findRecentByEmployeeNo("ADMIN002", 5)).thenReturn(List.of(activityLog));
+
+        List<ActivityLog> activityLogs = service.findRecentByEmployeeNo("ADMIN002", 5);
+
+        assertThat(activityLogs).containsExactly(activityLog);
     }
 
     private CreateActivityLogCommand command() {

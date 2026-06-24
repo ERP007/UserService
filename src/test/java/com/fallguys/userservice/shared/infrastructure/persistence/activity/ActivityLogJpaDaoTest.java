@@ -6,9 +6,11 @@ import com.fallguys.userservice.shared.domain.activity.ActivityLog;
 import com.fallguys.userservice.shared.domain.activity.UserActionType;
 import com.fallguys.userservice.shared.domain.command.CreateActivityLogCommand;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.data.domain.PageRequest;
 
 @DataJpaTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:activity-log-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE",
@@ -52,5 +54,44 @@ class ActivityLogJpaDaoTest {
         assertThat(saved.getCorrelationId()).isEqualTo("INV-7c3e0b76-44d0-4f53-9e65-200000000013");
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(activityLogJpaDao.existsByEventId(EVENT_ID)).isTrue();
+    }
+
+    @Test
+    void findsRecentActivityLogsByEmployeeNo() {
+        ActivityLog oldLog = ActivityLog.create(new CreateActivityLogCommand(
+                "7c3e0b76-44d0-4f53-9e65-200000000011",
+                "ADMIN002",
+                UserActionType.STOCK_CREATED,
+                Instant.parse("2026-06-24T09:15:30Z"),
+                "엔진오일 필터",
+                "HMC-EN-00214",
+                "+40",
+                "inventory-service",
+                "INV-7c3e0b76-44d0-4f53-9e65-200000000011"
+        ));
+        ActivityLog recentLog = ActivityLog.create(new CreateActivityLogCommand(
+                "7c3e0b76-44d0-4f53-9e65-200000000012",
+                "ADMIN002",
+                UserActionType.STOCK_ADJUSTED,
+                Instant.parse("2026-06-24T10:15:30Z"),
+                "엔진오일 필터",
+                "HMC-EN-00214",
+                "-3",
+                "inventory-service",
+                "INV-7c3e0b76-44d0-4f53-9e65-200000000012"
+        ));
+        activityLogJpaDao.save(ActivityLogEntity.from(oldLog));
+        activityLogJpaDao.saveAndFlush(ActivityLogEntity.from(recentLog));
+
+        List<ActivityLogEntity> activityLogs = activityLogJpaDao.findByEmployeeNoOrderByOccurredAtDescIdDesc(
+                "ADMIN002",
+                PageRequest.of(0, 5)
+        );
+
+        assertThat(activityLogs).extracting(ActivityLogEntity::getEventId)
+                .containsExactly(
+                        "7c3e0b76-44d0-4f53-9e65-200000000012",
+                        "7c3e0b76-44d0-4f53-9e65-200000000011"
+                );
     }
 }

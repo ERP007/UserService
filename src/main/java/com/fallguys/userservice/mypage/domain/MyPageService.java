@@ -2,6 +2,8 @@ package com.fallguys.userservice.mypage.domain;
 
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.activity.ActivityLog;
+import com.fallguys.userservice.shared.domain.activity.ActivityLogService;
 import com.fallguys.userservice.shared.domain.exception.UserAccessBlockedException;
 import com.fallguys.userservice.shared.domain.exception.UserErrorCode;
 import com.fallguys.userservice.shared.domain.exception.UserException;
@@ -9,6 +11,7 @@ import com.fallguys.userservice.shared.domain.model.User;
 import com.fallguys.userservice.shared.domain.model.UserIdentityState;
 import com.fallguys.userservice.shared.domain.model.UserStatus;
 import com.fallguys.userservice.shared.domain.query.UserDetail;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -21,6 +24,7 @@ public class MyPageService {
     private final MyPageRepository userRepository;
     private final UserIdentityManager userIdentityManager;
     private final SessionService sessionService;
+    private final ActivityLogService activityLogService;
 
     /**
      * 로그인한 사용자의 마이페이지 정보를 조회한다.
@@ -73,5 +77,24 @@ public class MyPageService {
         if (status == UserStatus.SUSPENDED) {
             throw new UserAccessBlockedException(UserErrorCode.USER_SUSPENDED);
         }
+    }
+
+    /**
+     * 로그인한 사용자의 최근 활동 로그를 조회한다.
+     *
+     * 흐름:
+     * 1) Gateway가 Relay한 JWT의 subject를 Keycloak ID로 사용한다.
+     * 2) 공통 SessionService로 토큰 Claim과 로컬 사용자 정보를 동기화한다.
+     * 3) 동기화된 사용자 사번으로 최근 활동 로그 5건을 조회한다.
+     *
+     * 트랜잭션: 쓰기. 세션 동기화가 필요한 경우 사용자 row가 갱신될 수 있다.
+     *
+     * 예외:
+     * - 필수 Claim(employee_no, tenancy_code) 누락 또는 미지원 Role: UserException(403 매핑), 조회 중단.
+     */
+    @Transactional
+    public List<ActivityLog> findMyActivityLogs(Jwt jwt) {
+        User user = sessionService.synchronizeSession(jwt);
+        return activityLogService.findRecentByEmployeeNo(user.getEmployeeNumber(), 5);
     }
 }

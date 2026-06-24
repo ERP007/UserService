@@ -20,6 +20,7 @@ import com.fallguys.userservice.shared.domain.InternalUserService;
 import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.activity.ActivityLogService;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
@@ -75,6 +76,9 @@ class UserManagementServiceTest {
     @Mock
     private UserSessionLogoutEventPublisher userSessionLogoutEventPublisher;
 
+    @Mock
+    private ActivityLogService activityLogService;
+
     private SessionService sessionService;
 
     private MyPageService myPageService;
@@ -90,7 +94,7 @@ class UserManagementServiceTest {
     @BeforeEach
     void setUp() {
         sessionService = new SessionService(userRepository, userIdentityManager);
-        myPageService = new MyPageService(userRepository, userIdentityManager, sessionService);
+        myPageService = new MyPageService(userRepository, userIdentityManager, sessionService, activityLogService);
         userManagementService = new UserManagementService(
                 userRepository,
                 userIdentityManager,
