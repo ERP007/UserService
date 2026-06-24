@@ -29,9 +29,11 @@ record SessionClaims(
         String name = claimOrDefault(jwt, "name", employeeNumber);
         String tenancyCode = requiredClaim(jwt, "tenancy_code");
         String tenancyName = jwt.getClaimAsString("tenancy_name");
+        UserTenancy tenancy = UserTenancy.fromClaim(jwt.getClaimAsString("tenancy_type"))
+                .orElse(null);
         String position = jwt.getClaimAsString("position");
 
-        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, tenancyName, position, role, null, null);
+        return new SessionClaims(keycloakId, employeeNumber, email, name, tenancyCode, tenancyName, position, role, tenancy, null);
     }
 
     static SessionClaims from(UserIdentity identity) {
