@@ -72,6 +72,9 @@ class UserManagementServiceTest {
     @Mock
     private UserAuthorityChangedEventPublisher userAuthorityChangedEventPublisher;
 
+    @Mock
+    private UserSessionLogoutEventPublisher userSessionLogoutEventPublisher;
+
     private SessionService sessionService;
 
     private MyPageService myPageService;
@@ -91,7 +94,8 @@ class UserManagementServiceTest {
         userManagementService = new UserManagementService(
                 userRepository,
                 userIdentityManager,
-                userAuthorityChangedEventPublisher
+                userAuthorityChangedEventPublisher,
+                userSessionLogoutEventPublisher
         );
         internalUserService = new InternalUserService(userRepository);
     }
@@ -123,7 +127,7 @@ class UserManagementServiceTest {
         assertThat(user.getTenancyName()).isEqualTo("ADMIN");
         assertThat(user.getPosition()).isEqualTo("관리자");
         assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
-        assertThat(user.getTenancy()).isNull();
+        assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getLastLoginAt()).isEqualTo(LOGIN_AT);
         assertThat(user.getLastLoginSessionId()).isEqualTo(LOGIN_SESSION_ID);
@@ -897,7 +901,10 @@ class UserManagementServiceTest {
         verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
         assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
-        verify(userIdentityManager).logoutSessions(targetKeycloakId);
+        ArgumentCaptor<UserSessionLogoutEvent> logoutEventCaptor =
+                ArgumentCaptor.forClass(UserSessionLogoutEvent.class);
+        verify(userSessionLogoutEventPublisher).publish(logoutEventCaptor.capture());
+        assertThat(logoutEventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
     }
 
     @Test
@@ -961,7 +968,7 @@ class UserManagementServiceTest {
 
         assertThat(result).isSameAs(detail);
         verify(userAuthorityChangedEventPublisher, never()).publish(any(UserAuthorityChangedEvent.class));
-        verify(userIdentityManager, never()).logoutSessions(any(String.class));
+        verify(userSessionLogoutEventPublisher, never()).publish(any(UserSessionLogoutEvent.class));
     }
 
     @Test
@@ -1029,7 +1036,10 @@ class UserManagementServiceTest {
         verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
         assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
-        verify(userIdentityManager).logoutSessions(targetKeycloakId);
+        ArgumentCaptor<UserSessionLogoutEvent> logoutEventCaptor =
+                ArgumentCaptor.forClass(UserSessionLogoutEvent.class);
+        verify(userSessionLogoutEventPublisher).publish(logoutEventCaptor.capture());
+        assertThat(logoutEventCaptor.getValue().keycloakSub()).isEqualTo(targetKeycloakId);
     }
 
     @Test
@@ -1073,7 +1083,10 @@ class UserManagementServiceTest {
         verify(userAuthorityChangedEventPublisher).publish(eventCaptor.capture());
         assertThat(eventCaptor.getValue().keycloakSub()).isEqualTo(command.keycloakId());
         assertThat(eventCaptor.getValue().employeeNo()).isEqualTo("HMC0001");
-        verify(userIdentityManager).logoutSessions(command.keycloakId());
+        ArgumentCaptor<UserSessionLogoutEvent> logoutEventCaptor =
+                ArgumentCaptor.forClass(UserSessionLogoutEvent.class);
+        verify(userSessionLogoutEventPublisher).publish(logoutEventCaptor.capture());
+        assertThat(logoutEventCaptor.getValue().keycloakSub()).isEqualTo(command.keycloakId());
     }
 
     @Test
@@ -1897,6 +1910,7 @@ class UserManagementServiceTest {
                 .claim("preferred_username", "admin001")
                 .claim("employee_no", employeeNo)
                 .claim("tenancy_code", tenancyCode)
+                .claim("tenancy_type", tenancyType)
                 .claim("user_role", userRole)
                 .claim("position", position)
                 .claim("email", "admin001@erp.com")

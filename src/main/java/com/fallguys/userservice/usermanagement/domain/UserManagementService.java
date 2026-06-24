@@ -39,6 +39,7 @@ public class UserManagementService {
     private final UserManagementRepository userRepository;
     private final UserIdentityManager userIdentityManager;
     private final UserAuthorityChangedEventPublisher userAuthorityChangedEventPublisher;
+    private final UserSessionLogoutEventPublisher userSessionLogoutEventPublisher;
 
     /**
      * 관리자 전용 사용자 목록을 조회한다.
@@ -157,7 +158,7 @@ public class UserManagementService {
             );
             userRepository.save(user);
             saveAuthorityChangedEventIfNeeded(sessionInvalidationRequired, user);
-            logoutIdentitySessionsAfterCommitIfNeeded(sessionInvalidationRequired, user.getKeycloakId());
+            saveSessionLogoutEventIfNeeded(sessionInvalidationRequired, user.getKeycloakId());
 
             return userRepository.findDetailByKeycloakId(command.keycloakId())
                     .orElseThrow(() -> new UserException(UserErrorCode.USER_NOT_FOUND));
@@ -333,12 +334,12 @@ public class UserManagementService {
         ));
     }
 
-    private void logoutIdentitySessionsAfterCommitIfNeeded(boolean sessionInvalidationRequired, String keycloakId) {
+    private void saveSessionLogoutEventIfNeeded(boolean sessionInvalidationRequired, String keycloakId) {
         if (!sessionInvalidationRequired) {
             return;
         }
 
-        runAfterCommit("Keycloak 사용자 세션 로그아웃", () -> userIdentityManager.logoutSessions(keycloakId));
+        userSessionLogoutEventPublisher.publish(new UserSessionLogoutEvent(keycloakId));
     }
 
     private UserIdentityState suspensionTargetState(String keycloakId, boolean targetEnabled) {

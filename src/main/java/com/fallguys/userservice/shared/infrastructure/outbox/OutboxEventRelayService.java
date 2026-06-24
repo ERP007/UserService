@@ -1,6 +1,8 @@
 package com.fallguys.userservice.shared.infrastructure.outbox;
 
+import com.fallguys.userservice.shared.domain.UserIdentityManager;
 import com.fallguys.userservice.shared.infrastructure.messaging.RabbitUserAuthorityChangedEventPublisher;
+import com.fallguys.userservice.shared.infrastructure.messaging.UserSessionLogoutMessage;
 import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxEventEntity;
 import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxEventJpaDao;
 import com.fallguys.userservice.shared.infrastructure.persistence.outbox.OutboxEventStatus;
@@ -19,15 +21,18 @@ public class OutboxEventRelayService {
 
     private final OutboxEventJpaDao outboxEventJpaDao;
     private final RabbitUserAuthorityChangedEventPublisher rabbitPublisher;
+    private final UserIdentityManager userIdentityManager;
     private final int maxAttempts;
 
     public OutboxEventRelayService(
             OutboxEventJpaDao outboxEventJpaDao,
             RabbitUserAuthorityChangedEventPublisher rabbitPublisher,
+            UserIdentityManager userIdentityManager,
             @Value("${outbox.relay.max-attempts:10}") int maxAttempts
     ) {
         this.outboxEventJpaDao = outboxEventJpaDao;
         this.rabbitPublisher = rabbitPublisher;
+        this.userIdentityManager = userIdentityManager;
         this.maxAttempts = Math.max(1, maxAttempts);
     }
 
@@ -51,7 +56,7 @@ public class OutboxEventRelayService {
         }
 
         try {
-            rabbitPublisher.publish(event);
+            relayEvent(event);
             event.markPublished(Instant.now());
         } catch (RuntimeException ex) {
             event.markPublishFailed(ex, maxAttempts);
@@ -64,5 +69,14 @@ public class OutboxEventRelayService {
                     ex
             );
         }
+    }
+
+    private void relayEvent(OutboxEventEntity event) {
+        if (UserSessionLogoutMessage.EVENT_TYPE.equals(event.getEventType())) {
+            userIdentityManager.logoutSessions(event.getAggregateId());
+            return;
+        }
+
+        rabbitPublisher.publish(event);
     }
 }
