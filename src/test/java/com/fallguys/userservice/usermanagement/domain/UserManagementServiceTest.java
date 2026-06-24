@@ -180,7 +180,7 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void refreshesExistingUserFromLatestKeycloakIdentityBeforeTokenClaims() {
+    void refreshesExistingUserFromTokenClaimsWithoutKeycloakIdentityLookup() {
         User existing = User.create(
                 KEYCLOAK_ID,
                 "admin001",
@@ -192,35 +192,21 @@ class UserManagementServiceTest {
                 UserRole.HQ_STAFF,
                 UserTenancy.HQ
         );
-        UserIdentity latestIdentity = new UserIdentity(
-                KEYCLOAK_ID,
-                "admin001",
-                "admin001@erp.com",
-                "윤 영선",
-                "ADMIN",
-                "관리자",
-                "관리자",
-                UserRole.ADMIN,
-                UserTenancy.ADMIN,
-                true,
-                false
-        );
-        Jwt jwtWithStaleClaims = jwt("admin001", "WH-HQ-001", "HQ", "HQ_STAFF", "사원");
-        when(userIdentityManager.findById(KEYCLOAK_ID)).thenReturn(Optional.of(latestIdentity));
+        Jwt jwt = jwt("admin001", "WH-HQ-002", "HQ", "HQ_MANAGER", "과장");
         when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(existing));
         when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        User user = sessionService.synchronizeSession(jwtWithStaleClaims);
+        User user = sessionService.synchronizeSession(jwt);
 
         assertThat(user).isSameAs(existing);
-        assertThat(user.getTenancyCode()).isEqualTo("ADMIN");
-        assertThat(user.getTenancyName()).isEqualTo("관리자");
-        assertThat(user.getPosition()).isEqualTo("관리자");
-        assertThat(user.getRole()).isEqualTo(UserRole.ADMIN);
-        assertThat(user.getTenancy()).isEqualTo(UserTenancy.ADMIN);
+        assertThat(user.getTenancyCode()).isEqualTo("WH-HQ-002");
+        assertThat(user.getTenancyName()).isEqualTo("WH-HQ-002");
+        assertThat(user.getPosition()).isEqualTo("과장");
+        assertThat(user.getRole()).isEqualTo(UserRole.HQ_MANAGER);
+        assertThat(user.getTenancy()).isEqualTo(UserTenancy.HQ);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
-        verify(userIdentityManager).findById(KEYCLOAK_ID);
+        verify(userIdentityManager, never()).findById(any(String.class));
         verify(userRepository).save(existing);
     }
 

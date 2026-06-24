@@ -21,11 +21,11 @@ public class SessionService {
      * Gateway가 Relay한 Keycloak Access Token과 매핑되는 로컬 사용자를 조회하거나 생성한다.
      *
      * 흐름:
-     * 1) JWT에서 사용자 ID를 확인하고, 가능하면 Keycloak Admin API의 최신 사용자 속성을 우선 사용한다.
+     * 1) JWT에서 사용자 ID와 세션 동기화에 필요한 사용자 속성을 확인한다.
      * 2) JWT의 auth_time/iat와 sid로 마지막 로그인 시각과 로그인 세션 ID를 계산한다.
      * 3) 필요한 경우 Keycloak password credential의 createdDate를 조회해 비밀번호 마지막 변경 시각을 계산한다(외부 호출).
      * 4) Keycloak sub와 매핑되는 로컬 사용자가 없으면 ACTIVE 상태로 생성한다.
-     * 5) 기존 사용자는 Keycloak 기준 프로필·권한과 로그인 메타데이터를 최신 값으로 갱신한다.
+     * 5) 기존 사용자는 JWT 기준 프로필·권한과 로그인 메타데이터를 최신 값으로 갱신한다.
      *
      * 트랜잭션: 쓰기. 외부 credential 조회 실패 시 저장 전 중단되어 로컬 값은 변경되지 않는다.
      *
@@ -43,7 +43,7 @@ public class SessionService {
      * 인증된 사용자 정보를 동기화하되 Keycloak password credential 생성일을 강제로 다시 조회한다.
      *
      * 흐름:
-     * 1) 기본 세션 동기화와 동일하게 Keycloak 기준 프로필·권한과 로그인 메타데이터를 반영한다.
+     * 1) 기본 세션 동기화와 동일하게 JWT 기준 프로필·권한과 로그인 메타데이터를 반영한다.
      * 2) 로그인 세션 ID 변경 여부와 무관하게 Keycloak password credential 생성일을 조회한다(외부 호출).
      * 3) 조회한 비밀번호 변경 시각을 로컬 사용자에 반영한다.
      *
@@ -142,11 +142,7 @@ public class SessionService {
     }
 
     private SessionClaims resolveSessionClaims(Jwt jwt) {
-        SessionClaims tokenClaims = SessionClaims.from(jwt, JwtClaims.role(jwt));
-
-        return userIdentityManager.findById(tokenClaims.keycloakId())
-                .map(SessionClaims::from)
-                .orElse(tokenClaims);
+        return SessionClaims.from(jwt, JwtClaims.role(jwt));
     }
 
     private boolean applyIdentityState(User user, SessionClaims claims) {
