@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @DataJpaTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:activity-log-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE",
@@ -25,6 +26,9 @@ class ActivityLogJpaDaoTest {
 
     @Autowired
     private ActivityLogJpaDao activityLogJpaDao;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void savesActivityLogByEventId() {
@@ -53,7 +57,29 @@ class ActivityLogJpaDaoTest {
         assertThat(saved.getProducer()).isEqualTo("inventory-service");
         assertThat(saved.getCorrelationId()).isEqualTo("INV-7c3e0b76-44d0-4f53-9e65-200000000013");
         assertThat(saved.getCreatedAt()).isNotNull();
-        assertThat(activityLogJpaDao.existsByEventId(EVENT_ID)).isTrue();
+    }
+
+    @Test
+    void saveIfAbsentIgnoresDuplicatedEventId() {
+        ActivityLogRepositoryAdapter adapter = new ActivityLogRepositoryAdapter(activityLogJpaDao, transactionManager);
+        ActivityLog activityLog = ActivityLog.create(new CreateActivityLogCommand(
+                EVENT_ID,
+                "ADMIN002",
+                UserActionType.STOCK_ADJUSTED,
+                Instant.parse("2026-06-24T10:15:30Z"),
+                "엔진오일 필터",
+                "HMC-EN-00214",
+                "-3",
+                "inventory-service",
+                "INV-7c3e0b76-44d0-4f53-9e65-200000000013"
+        ));
+
+        boolean firstInserted = adapter.saveIfAbsent(activityLog);
+        boolean secondInserted = adapter.saveIfAbsent(activityLog);
+
+        assertThat(firstInserted).isTrue();
+        assertThat(secondInserted).isFalse();
+        assertThat(activityLogJpaDao.findAll()).hasSize(1);
     }
 
     @Test
@@ -94,4 +120,5 @@ class ActivityLogJpaDaoTest {
                         "7c3e0b76-44d0-4f53-9e65-200000000011"
                 );
     }
+
 }

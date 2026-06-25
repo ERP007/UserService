@@ -4,9 +4,7 @@ import java.util.List;
 
 public interface ActivityLogRepository {
 
-    boolean existsByEventId(String eventId);
+    boolean saveIfAbsent(ActivityLog activityLog);
 
     List<ActivityLog> findRecentByEmployeeNo(String employeeNo, int limit);
-
-    ActivityLog save(ActivityLog activityLog);
 }

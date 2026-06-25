@@ -2,7 +2,6 @@ package com.fallguys.userservice.shared.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,13 +31,12 @@ class ActivityLogServiceTest {
     void recordsActivityLogWhenEventIsNotDuplicated() {
         ActivityLogService service = new ActivityLogService(activityLogRepository);
         CreateActivityLogCommand command = command();
-        when(activityLogRepository.existsByEventId(EVENT_ID)).thenReturn(false);
-        when(activityLogRepository.save(any(ActivityLog.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(activityLogRepository.saveIfAbsent(any(ActivityLog.class))).thenReturn(true);
 
         service.record(command);
 
         ArgumentCaptor<ActivityLog> logCaptor = ArgumentCaptor.forClass(ActivityLog.class);
-        verify(activityLogRepository).save(logCaptor.capture());
+        verify(activityLogRepository).saveIfAbsent(logCaptor.capture());
         ActivityLog savedLog = logCaptor.getValue();
         assertThat(savedLog.getEventId()).isEqualTo(EVENT_ID);
         assertThat(savedLog.getEmployeeNo()).isEqualTo("ADMIN002");
@@ -53,13 +51,13 @@ class ActivityLogServiceTest {
     }
 
     @Test
-    void skipsDuplicatedEventAsSuccess() {
+    void treatsDuplicatedEventAsSuccess() {
         ActivityLogService service = new ActivityLogService(activityLogRepository);
-        when(activityLogRepository.existsByEventId(EVENT_ID)).thenReturn(true);
+        when(activityLogRepository.saveIfAbsent(any(ActivityLog.class))).thenReturn(false);
 
         service.record(command());
 
-        verify(activityLogRepository, never()).save(any(ActivityLog.class));
+        verify(activityLogRepository).saveIfAbsent(any(ActivityLog.class));
     }
 
     @Test
