@@ -84,17 +84,29 @@ public class MyPageService {
      *
      * 흐름:
      * 1) Gateway가 Relay한 JWT의 subject를 Keycloak ID로 사용한다.
-     * 2) 공통 SessionService로 토큰 Claim과 로컬 사용자 정보를 동기화한다.
-     * 3) 동기화된 사용자 사번으로 최근 활동 로그 5건을 조회한다.
+     * 2) 공통 SessionService로 토큰 Claim, 로그인 메타데이터, Keycloak password credential 생성일을 로컬 사용자에 동기화한다.
+     * 3) Keycloak enabled/required action 상태를 확인해 로컬 사용자 상태를 보정한다.
+     * 4) PENDING 또는 SUSPENDED 상태인지 확인한 뒤 최근 활동 로그 5건을 조회한다.
      *
-     * 트랜잭션: 쓰기. 세션 동기화가 필요한 경우 사용자 row가 갱신될 수 있다.
+     * 트랜잭션: 쓰기. 최근 활동 로그 조회 직전에 Keycloak 기준 메타데이터를 로컬 DB에 동기화한다.
+     * 접근 차단용 UserAccessBlockedException만 동기화 저장을 롤백하지 않는다.
      *
      * 예외:
      * - 필수 Claim(employee_no, tenancy_code) 누락 또는 미지원 Role: UserException(403 매핑), 조회 중단.
+     * - Keycloak credential 또는 상태 조회 실패: BusinessException 계열, 트랜잭션 롤백.
+     * - PENDING 또는 SUSPENDED 사용자: UserAccessBlockedException(403 매핑), 조회 중단. 단, 앞선 동기화 저장은 커밋된다.
      */
-    @Transactional
+    @Transactional(noRollbackFor = UserAccessBlockedException.class)
     public List<ActivityLog> findMyActivityLogs(Jwt jwt) {
-        User user = sessionService.synchronizeSession(jwt);
+        User user = sessionService.synchronizeSessionWithPasswordCredential(jwt);
+        UserIdentityState identityState = userIdentityManager.findState(jwt.getSubject());
+        UserStatus statusBeforeIdentitySync = user.getStatus();
+        user.applyIdentityState(identityState);
+        if (user.getStatus() != statusBeforeIdentitySync) {
+            user = userRepository.save(user);   // User Status 최신 상태로 업데이트
+        }
+
+        requireMyPageAccessible(user.getStatus());
         return activityLogService.findRecentByEmployeeNo(user.getEmployeeNumber(), 5);
     }
 }
