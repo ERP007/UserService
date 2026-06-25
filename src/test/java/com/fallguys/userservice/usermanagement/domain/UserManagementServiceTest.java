@@ -3,6 +3,7 @@ package com.fallguys.userservice.usermanagement.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -20,6 +21,7 @@ import com.fallguys.userservice.shared.domain.InternalUserService;
 import com.fallguys.userservice.shared.domain.SessionRepository;
 import com.fallguys.userservice.shared.domain.SessionService;
 import com.fallguys.userservice.shared.domain.UserIdentityManager;
+import com.fallguys.userservice.shared.domain.activity.ActivityLogService;
 import com.fallguys.userservice.shared.domain.command.CreateUserIdentityCommand;
 import com.fallguys.userservice.shared.domain.command.TemporaryPasswordPolicy;
 import com.fallguys.userservice.shared.domain.command.UpdateUserIdentityCommand;
@@ -75,6 +77,9 @@ class UserManagementServiceTest {
     @Mock
     private UserSessionLogoutEventPublisher userSessionLogoutEventPublisher;
 
+    @Mock
+    private ActivityLogService activityLogService;
+
     private SessionService sessionService;
 
     private MyPageService myPageService;
@@ -90,7 +95,7 @@ class UserManagementServiceTest {
     @BeforeEach
     void setUp() {
         sessionService = new SessionService(userRepository, userIdentityManager);
-        myPageService = new MyPageService(userRepository, userIdentityManager, sessionService);
+        myPageService = new MyPageService(userRepository, userIdentityManager, sessionService, activityLogService);
         userManagementService = new UserManagementService(
                 userRepository,
                 userIdentityManager,
@@ -809,11 +814,98 @@ class UserManagementServiceTest {
     }
 
     @Test
-    void keepsMyPageSynchronizationWhenAccessDenied() throws NoSuchMethodException {
-        Method method = MyPageService.class.getDeclaredMethod("findMyPage", Jwt.class);
-        Transactional transactional = method.getAnnotation(Transactional.class);
+    void findsMyActivityLogsByAuthenticatedUserSubject() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        User user = User.create(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "강남 1지점",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(activityLogService.findRecentByEmployeeNo("branch001", 5)).thenReturn(List.of());
 
-        assertThat(transactional.noRollbackFor())
+        List<?> actual = myPageService.findMyActivityLogs(jwt);
+
+        assertThat(actual).isEmpty();
+        verify(userIdentityManager).findPasswordChangedAt(KEYCLOAK_ID);
+        verify(userIdentityManager).findState(KEYCLOAK_ID);
+        verify(activityLogService).findRecentByEmployeeNo("branch001", 5);
+    }
+
+    @Test
+    void rejectsMyActivityLogsWhenUserIsPending() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        User user = User.createPending(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "강남 1지점",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(true, true));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertUserError(
+                () -> myPageService.findMyActivityLogs(jwt),
+                UserErrorCode.USER_MYPAGE_PASSWORD_CHANGE_REQUIRED
+        );
+        assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
+        verify(activityLogService, never()).findRecentByEmployeeNo(any(String.class), anyInt());
+    }
+
+    @Test
+    void rejectsMyActivityLogsWhenUserIsSuspended() {
+        Jwt jwt = jwt("branch001", "WH-BR-001", "BRANCH", "BRANCH_MANAGER", "점장");
+        User user = User.create(
+                KEYCLOAK_ID,
+                "branch001",
+                "branch001@erp.com",
+                "지점 담당자",
+                "WH-BR-001",
+                "강남 1지점",
+                "점장",
+                UserRole.BRANCH_MANAGER,
+                UserTenancy.BRANCH
+        );
+        when(userRepository.findByKeycloakId(KEYCLOAK_ID)).thenReturn(Optional.of(user));
+        when(userIdentityManager.findPasswordChangedAt(KEYCLOAK_ID)).thenReturn(Optional.of(PASSWORD_CHANGED_AT));
+        when(userIdentityManager.findState(KEYCLOAK_ID)).thenReturn(new UserIdentityState(false, false));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertUserError(
+                () -> myPageService.findMyActivityLogs(jwt),
+                UserErrorCode.USER_SUSPENDED
+        );
+        assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        verify(activityLogService, never()).findRecentByEmployeeNo(any(String.class), anyInt());
+    }
+
+    @Test
+    void keepsMyPageSynchronizationWhenAccessDenied() throws NoSuchMethodException {
+        Method findMyPage = MyPageService.class.getDeclaredMethod("findMyPage", Jwt.class);
+        Transactional findMyPageTransactional = findMyPage.getAnnotation(Transactional.class);
+        Method findMyActivityLogs = MyPageService.class.getDeclaredMethod("findMyActivityLogs", Jwt.class);
+        Transactional findMyActivityLogsTransactional = findMyActivityLogs.getAnnotation(Transactional.class);
+
+        assertThat(findMyPageTransactional.noRollbackFor())
+                .contains(UserAccessBlockedException.class)
+                .doesNotContain(UserException.class);
+        assertThat(findMyActivityLogsTransactional.noRollbackFor())
                 .contains(UserAccessBlockedException.class)
                 .doesNotContain(UserException.class);
     }
