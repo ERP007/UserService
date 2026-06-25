@@ -23,6 +23,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 class ActivityLogJpaDaoTest {
 
     private static final String EVENT_ID = "7c3e0b76-44d0-4f53-9e65-200000000013";
+    private static final String SAVE_IF_ABSENT_EVENT_ID = "7c3e0b76-44d0-4f53-9e65-200000000014";
 
     @Autowired
     private ActivityLogJpaDao activityLogJpaDao;
@@ -63,7 +64,7 @@ class ActivityLogJpaDaoTest {
     void saveIfAbsentIgnoresDuplicatedEventId() {
         ActivityLogRepositoryAdapter adapter = new ActivityLogRepositoryAdapter(activityLogJpaDao, transactionManager);
         ActivityLog activityLog = ActivityLog.create(new CreateActivityLogCommand(
-                EVENT_ID,
+                SAVE_IF_ABSENT_EVENT_ID,
                 "ADMIN002",
                 UserActionType.STOCK_ADJUSTED,
                 Instant.parse("2026-06-24T10:15:30Z"),
@@ -71,7 +72,7 @@ class ActivityLogJpaDaoTest {
                 "HMC-EN-00214",
                 "-3",
                 "inventory-service",
-                "INV-7c3e0b76-44d0-4f53-9e65-200000000013"
+                "INV-7c3e0b76-44d0-4f53-9e65-200000000014"
         ));
 
         boolean firstInserted = adapter.saveIfAbsent(activityLog);
