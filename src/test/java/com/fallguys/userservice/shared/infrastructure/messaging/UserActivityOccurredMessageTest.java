@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fallguys.userservice.shared.domain.activity.UserActionType;
 import com.fallguys.userservice.shared.domain.command.CreateActivityLogCommand;
 import com.fallguys.userservice.shared.domain.exception.UserException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
@@ -68,6 +69,38 @@ class UserActivityOccurredMessageTest {
         assertThat(roundTripped.eventId()).isEqualTo("7c3e0b76-44d0-4f53-9e65-200000000013");
         assertThat(roundTripped.payload().action()).isEqualTo(UserActionType.STOCK_ADJUSTED);
         assertThat(roundTripped.payload().occurredAt()).isEqualTo(Instant.parse("2026-06-24T10:15:30Z"));
+    }
+
+    @Test
+    void rabbitMessageConverterDeserializesSalesOrderCreatedAction() {
+        MessageConverter messageConverter = new UserAuthorityRabbitConfig().rabbitMessageConverter();
+        MessageProperties messageProperties = new MessageProperties();
+        messageProperties.setContentType("application/json");
+        messageProperties.setInferredArgumentType(UserActivityOccurredMessage.class);
+        Message message = new Message("""
+                {
+                  "eventId": "80f2d835-0b8f-4014-91d7-95d2a21bd4aa",
+                  "eventType": "user.activity.occurred",
+                  "eventVersion": 1,
+                  "producer": "sales-service",
+                  "occurredAt": "2026-06-25T03:47:34Z",
+                  "correlationId": "SO-20260625-00001",
+                  "payload": {
+                    "employeeNo": "admin",
+                    "action": "SALES_ORDER_CREATED",
+                    "occurredAt": "2026-06-25T03:47:34Z",
+                    "title": "발주 요청",
+                    "content": "SO-20260625-00001",
+                    "status": "요청"
+                  }
+                }
+                """.getBytes(StandardCharsets.UTF_8), messageProperties);
+
+        Object converted = messageConverter.fromMessage(message);
+
+        assertThat(converted).isInstanceOf(UserActivityOccurredMessage.class);
+        UserActivityOccurredMessage roundTripped = (UserActivityOccurredMessage) converted;
+        assertThat(roundTripped.payload().action()).isEqualTo(UserActionType.SALES_ORDER_CREATED);
     }
 
     private UserActivityOccurredMessage message() {

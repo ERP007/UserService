@@ -20,6 +20,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.util.StringUtils;
@@ -39,6 +40,7 @@ import static com.fallguys.userservice.shared.infrastructure.swagger.OpenApiConf
 @RequestMapping("/users")
 @RequiredArgsConstructor
 @Tag(name = "User Management", description = "관리자 사용자 관리 API")
+@PreAuthorize("hasRole('ADMIN')")
 class UserManagementController {
 
     private final UserManagementService userManagementService;

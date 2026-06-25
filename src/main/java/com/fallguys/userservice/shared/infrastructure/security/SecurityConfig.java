@@ -2,23 +2,34 @@ package com.fallguys.userservice.shared.infrastructure.security;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fallguys.userservice.shared.domain.exception.CommonErrorCode;
+import com.fallguys.userservice.shared.domain.model.UserRole;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
+
+    private static final String USER_ROLE_CLAIM = "user_role";
+    private static final String ROLE_PREFIX = "ROLE_";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -47,11 +58,26 @@ public class SecurityConfig {
                                         writeError(response, HttpStatus.UNAUTHORIZED, CommonErrorCode.AUTHENTICATION_REQUIRED))
                                 .accessDeniedHandler((request, response, ex) ->
                                         writeError(response, HttpStatus.FORBIDDEN, CommonErrorCode.ACCESS_DENIED))
-                                .jwt(Customizer.withDefaults())
+                                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
                 )  // OAuth2 Resource Server로 동작하게 만드는 설정
                 .csrf(AbstractHttpConfigurer::disable);
 
         return http.build();
+    }
+
+    @Bean
+    JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(this::convertUserRoleAuthority);
+        return converter;
+    }
+
+    private Collection<GrantedAuthority> convertUserRoleAuthority(Jwt jwt) {
+        return UserRole.fromClaim(jwt.getClaimAsString(USER_ROLE_CLAIM))
+                .<Collection<GrantedAuthority>>map(role ->
+                        List.of(new SimpleGrantedAuthority(ROLE_PREFIX + role.name()))
+                )
+                .orElseGet(List::of);
     }
 
     private void writeError(
