@@ -1,5 +1,6 @@
 package com.fallguys.userservice.mypage.controller;
 
+import com.fallguys.userservice.mypage.controller.dto.MyActivityLogListResponse;
 import com.fallguys.userservice.mypage.controller.dto.MyPageResponse;
 import com.fallguys.userservice.mypage.domain.MyPageService;
 import com.fallguys.userservice.shared.domain.exception.CommonErrorCode;
@@ -32,6 +33,14 @@ class MyPageController {
     MyPageResponse fetchMyProfile(@Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt) {
         Jwt authenticatedJwt = requireJwt(jwt);
         return MyPageResponse.from(myPageService.findMyPage(authenticatedJwt));
+    }
+
+    @Operation(summary = "내 최근 활동 로그 조회", description = "로그인한 사용자의 최근 활동 로그 5건을 조회합니다.")
+    @SecurityRequirement(name = BEARER_AUTH)
+    @GetMapping("/me/activity-logs")
+    MyActivityLogListResponse fetchMyActivityLogs(@Parameter(hidden = true) @AuthenticationPrincipal Jwt jwt) {
+        Jwt authenticatedJwt = requireJwt(jwt);
+        return MyActivityLogListResponse.from(myPageService.findMyActivityLogs(authenticatedJwt));
     }
 
     private Jwt requireJwt(Jwt jwt) {

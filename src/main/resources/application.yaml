@@ -34,6 +34,15 @@ spring:
         initial-interval: 500ms
         multiplier: 2
         max-interval: 3s
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 500ms
+          multiplier: 2
+          max-interval: 3s
 
   security:
     oauth2:
